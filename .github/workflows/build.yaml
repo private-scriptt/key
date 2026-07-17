@@ -1,0 +1,205 @@
+name: Build Sync XxX APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      apk_name:
+        description: 'Nama APK Output'
+        required: true
+        default: 'SyncXxX'
+      build_type:
+        description: 'Tipe Build'
+        required: true
+        default: 'release'
+        type: choice
+        options:
+          - release
+          - debug
+
+env:
+  APK_NAME: ${{ github.event.inputs.apk_name || 'SyncXxX' }}
+  BUILD_TYPE: ${{ github.event.inputs.build_type || 'release' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Show build inputs
+        run: |
+          echo "📦 APK Name : $APK_NAME"
+          echo "🔧 Build Type: $BUILD_TYPE"
+
+      - name: Check for uploaded ZIP
+        id: check_zip
+        run: |
+          if [ -f "uploads/latest_project.zip" ]; then
+            echo "zip_found=true" >> $GITHUB_OUTPUT
+            echo "📦 User ZIP found"
+          else
+            echo "zip_found=false" >> $GITHUB_OUTPUT
+            echo "📦 No user ZIP, using existing android/ project"
+          fi
+
+      - name: Extract User Project ZIP
+        if: steps.check_zip.outputs.zip_found == 'true'
+        run: |
+          echo "📦 Extracting user project..."
+          rm -rf android extracted_temp
+          mkdir -p extracted_temp
+          unzip -o uploads/latest_project.zip -d extracted_temp/
+          echo "📁 Extracted contents:"
+          ls -la extracted_temp/
+
+          find extracted_temp -maxdepth 1 -type f | while read f; do
+            cp "$f" ./
+            echo "📄 Copied: $(basename $f)"
+          done
+
+          if [ -d "extracted_temp/android" ] && [ -f "extracted_temp/android/gradlew" ]; then
+            echo "📁 Using android subfolder"
+            mv extracted_temp/android android
+          elif [ -f "extracted_temp/gradlew" ]; then
+            echo "📁 Using root contents"
+            mv extracted_temp android
+          else
+            GRADLEW_PATH=$(find extracted_temp -name "gradlew" | head -1)
+            if [ -n "$GRADLEW_PATH" ]; then
+              PROJECT_DIR=$(dirname "$GRADLEW_PATH")
+              echo "📁 Found gradlew in: $PROJECT_DIR"
+              mv "$PROJECT_DIR" android
+            else
+              echo "❌ No gradlew found in ZIP!"
+              exit 1
+            fi
+          fi
+          rm -rf extracted_temp
+          echo "📁 Final structure:"
+          ls -la
+
+      - name: Fix Gradle Wrapper
+        run: |
+          cd android
+          if [ ! -f "gradle/wrapper/gradle-wrapper.jar" ]; then
+            echo "📥 gradle-wrapper.jar missing, generating..."
+            mkdir -p gradle/wrapper
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq unzip
+            curl -fL -o /tmp/gradle-8.4-bin.zip "https://services.gradle.org/distributions/gradle-8.4-bin.zip"
+            unzip -q /tmp/gradle-8.4-bin.zip -d /tmp/
+            /tmp/gradle-8.4/bin/gradle wrapper --gradle-version 8.4
+            rm -rf /tmp/gradle-8.4 /tmp/gradle-8.4-bin.zip
+            echo "✅ Wrapper generated"
+          fi
+          if [ ! -f "gradle/wrapper/gradle-wrapper.properties" ]; then
+            echo "📝 Creating gradle-wrapper.properties..."
+            mkdir -p gradle/wrapper
+            printf '%s\n' \
+              'distributionBase=GRADLE_USER_HOME' \
+              'distributionPath=wrapper/dists' \
+              'distributionUrl=https\://services.gradle.org/distributions/gradle-8.4-bin.zip' \
+              'networkTimeout=10000' \
+              'validateDistributionUrl=true' \
+              'zipStoreBase=GRADLE_USER_HOME' \
+              'zipStorePath=wrapper/dists' > gradle/wrapper/gradle-wrapper.properties
+          fi
+          chmod +x gradlew
+          echo "✅ Gradle wrapper ready"
+
+      - name: Verify Android Project
+        run: |
+          if [ ! -f "android/gradlew" ]; then
+            echo "❌ gradlew not found!"
+            exit 1
+          fi
+          echo "✅ gradlew found"
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Pillow
+        run: pip install Pillow
+
+      - name: Generate App Icons
+        run: |
+          # Hapus adaptive icon XML yang konflik
+          find android/app/src/main/res/ -name "*.xml" -path "*/mipmap*" -delete 2>/dev/null || true
+          find android/app/src/main/res/drawable* -name "ic_launcher*" -delete 2>/dev/null || true
+          find android/app/src/main/res/values* -name "ic_launcher*" -delete 2>/dev/null || true
+          rm -f android/app/src/main/res/drawable/ic_launcher_background.xml 2>/dev/null || true
+          rm -f android/app/src/main/res/drawable/ic_launcher_foreground.xml 2>/dev/null || true
+          echo "📁 Files di root:"
+          ls -la *.jpg *.py 2>/dev/null || echo "(tidak ada jpg/py di root)"
+          if [ -f "generate_icons.py" ]; then
+            echo "🎨 Running generate_icons.py..."
+            python3 generate_icons.py
+          else
+            echo "⚠️ generate_icons.py tidak ditemukan, generate placeholder..."
+            python3 - << 'PYEOF'
+          from PIL import Image, ImageDraw
+          import os
+          sizes = {'mipmap-mdpi':48,'mipmap-hdpi':72,'mipmap-xhdpi':96,'mipmap-xxhdpi':144,'mipmap-xxxhdpi':192}
+          icons = ['ic_launcher','ic_launcher_round','ic_theme_xnxx','ic_theme_telegram','ic_theme_instagram','ic_theme_youtube','ic_theme_whatsapp']
+          colors = {'ic_launcher':(66,133,244),'ic_launcher_round':(66,133,244),'ic_theme_xnxx':(255,0,0),'ic_theme_telegram':(0,136,204),'ic_theme_instagram':(225,48,108),'ic_theme_youtube':(255,0,0),'ic_theme_whatsapp':(37,211,102)}
+          for folder,size in sizes.items():
+              p=f'android/app/src/main/res/{folder}'
+              os.makedirs(p,exist_ok=True)
+              for icon in icons:
+                  img=Image.new('RGBA',(size,size),colors.get(icon,(100,100,100)))
+                  img.save(f'{p}/{icon}.png')
+          print("✅ Done")
+          PYEOF
+          fi
+
+      - name: Build APK
+        run: |
+          set -e
+          cd android
+          echo "🔨 Building $BUILD_TYPE APK..."
+          if [ "$BUILD_TYPE" = "debug" ]; then
+            ./gradlew assembleDebug --no-daemon --stacktrace
+            APK_SRC=$(find app/build/outputs/apk/debug/ -name "*.apk" | head -1)
+          else
+            ./gradlew assembleRelease --no-daemon --stacktrace
+            APK_SRC=$(find app/build/outputs/apk/release/ -name "*.apk" | head -1)
+          fi
+          if [ -z "$APK_SRC" ]; then
+            echo "❌ Gradle selesai tapi APK tidak ditemukan!"
+            find app/build/outputs/ -name "*.apk" 2>/dev/null || echo "(tidak ada APK sama sekali)"
+            exit 1
+          fi
+          echo "✅ APK ditemukan: $APK_SRC"
+          mkdir -p ../output
+          cp "$APK_SRC" "../output/${APK_NAME}.apk"
+          echo "✅ Copied to output/${APK_NAME}.apk"
+
+      - name: Verify Output
+        run: |
+          echo "📂 Isi folder output:"
+          ls -lah output/ || { echo "❌ Folder output tidak ada!"; exit 1; }
+          if [ ! -f "output/${APK_NAME}.apk" ]; then
+            echo "❌ APK output/${APK_NAME}.apk tidak ditemukan!"
+            exit 1
+          fi
+          echo "✅ APK siap: output/${APK_NAME}.apk"
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APK_NAME }}
+          path: output/${{ env.APK_NAME }}.apk
+          retention-days: 30
