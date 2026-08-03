@@ -1,0 +1,423 @@
+name: Build Web to APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      apk_name:
+        description: 'Nama APK Output'
+        required: true
+        default: 'WebApp'
+      build_type:
+        description: 'Tipe Build'
+        required: true
+        default: 'release'
+        type: choice
+        options:
+          - release
+          - debug
+
+env:
+  APK_NAME: ${{ github.event.inputs.apk_name || 'WebApp' }}
+  BUILD_TYPE: ${{ github.event.inputs.build_type || 'release' }}
+
+jobs:
+  build-web-apk:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install image tools
+        run: pip install Pillow
+
+      - name: Validate Web APK inputs
+        run: |
+          set -e
+          test -f uploads/web_config.json || { echo "❌ uploads/web_config.json tidak ditemukan"; exit 1; }
+          test -f uploads/web_icon.bin || { echo "❌ uploads/web_icon.bin tidak ditemukan"; exit 1; }
+
+      - name: Generate WebView Android Project
+        run: |
+          set -e
+          rm -rf android
+          python3 - <<'PYEOF'
+          import json
+          import re
+          from pathlib import Path
+          from xml.sax.saxutils import escape
+
+          config = json.loads(Path('uploads/web_config.json').read_text(encoding='utf-8'))
+          app_name = str(config.get('app_name', '')).strip()[:40]
+          web_url = str(config.get('web_url', '')).strip()
+          package_name = str(config.get('package_name', '')).strip().lower()
+
+          if not app_name:
+              raise SystemExit('Nama aplikasi kosong')
+          if not re.fullmatch(r'[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*){1,5}', package_name):
+              raise SystemExit('Package name tidak valid')
+          if not re.match(r'^https?://', web_url, re.I):
+              raise SystemExit('URL website tidak valid')
+
+          root = Path('android')
+          java_dir = root / 'app/src/main/java' / Path(package_name.replace('.', '/'))
+          values_dir = root / 'app/src/main/res/values'
+          values_v35_dir = root / 'app/src/main/res/values-v35'
+          java_dir.mkdir(parents=True, exist_ok=True)
+          values_dir.mkdir(parents=True, exist_ok=True)
+          values_v35_dir.mkdir(parents=True, exist_ok=True)
+
+          (root / 'settings.gradle').write_text(
+              "pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }\n"
+              "dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }\n"
+              "rootProject.name = 'WebToApk'\n"
+              "include ':app'\n",
+              encoding='utf-8'
+          )
+          (root / 'build.gradle').write_text(
+              "plugins {\n    id 'com.android.application' version '8.6.1' apply false\n}\n",
+              encoding='utf-8'
+          )
+          (root / 'gradle.properties').write_text(
+              "org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8\n"
+              "android.useAndroidX=true\n"
+              "android.nonTransitiveRClass=true\n",
+              encoding='utf-8'
+          )
+          (root / 'app').mkdir(parents=True, exist_ok=True)
+          (root / 'app/build.gradle').write_text(f"""plugins {{
+              id 'com.android.application'
+          }}
+
+          android {{
+              namespace '{package_name}'
+              compileSdk 35
+
+              defaultConfig {{
+                  applicationId '{package_name}'
+                  minSdk 23
+                  targetSdk 35
+                  versionCode 1
+                  versionName '1.0'
+              }}
+
+              buildTypes {{
+                  release {{
+                      minifyEnabled false
+                      signingConfig signingConfigs.debug
+                  }}
+                  debug {{
+                      debuggable true
+                  }}
+              }}
+          }}
+          """, encoding='utf-8')
+
+          main_dir = root / 'app/src/main'
+          main_dir.mkdir(parents=True, exist_ok=True)
+          (main_dir / 'AndroidManifest.xml').write_text(f"""<?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+              <application
+                  android:allowBackup="true"
+                  android:icon="@mipmap/ic_launcher"
+                  android:roundIcon="@mipmap/ic_launcher_round"
+                  android:label="@string/app_name"
+                  android:usesCleartextTraffic="true"
+                  android:theme="@style/AppTheme">
+                  <activity
+                      android:name=".MainActivity"
+                      android:configChanges="keyboard|keyboardHidden|orientation|screenSize|smallestScreenSize|uiMode"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          """, encoding='utf-8')
+
+          (values_dir / 'strings.xml').write_text(
+              f'<?xml version="1.0" encoding="utf-8"?>\n<resources><string name="app_name">{escape(app_name)}</string></resources>\n',
+              encoding='utf-8'
+          )
+          (values_dir / 'styles.xml').write_text('''<?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
+                  <item name="android:fontFamily">sans</item>
+                  <item name="android:windowActionModeOverlay">true</item>
+                  <item name="android:windowFullscreen">false</item>
+                  <item name="android:colorAccent">#000000</item>
+                  <item name="android:windowBackground">#000000</item>
+                  <item name="android:navigationBarColor">#000000</item>
+                  <item name="android:statusBarColor">#000000</item>
+                  <item name="android:windowLightStatusBar">false</item>
+                  <item name="android:windowLightNavigationBar">false</item>
+                  <item name="android:enforceStatusBarContrast">false</item>
+                  <item name="android:enforceNavigationBarContrast">false</item>
+              </style>
+          </resources>
+          ''', encoding='utf-8')
+
+          # Android 15 / target SDK 35: jangan paksa WebView menjadi edge-to-edge.
+          # Attribute ini hanya dipakai pada API 35 sehingga versi Android lama tetap aman.
+          (values_v35_dir / 'styles.xml').write_text('''<?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
+                  <item name="android:fontFamily">sans</item>
+                  <item name="android:windowActionModeOverlay">true</item>
+                  <item name="android:windowFullscreen">false</item>
+                  <item name="android:windowOptOutEdgeToEdgeEnforcement">true</item>
+                  <item name="android:colorAccent">#000000</item>
+                  <item name="android:windowBackground">#000000</item>
+                  <item name="android:navigationBarColor">#000000</item>
+                  <item name="android:statusBarColor">#000000</item>
+                  <item name="android:windowLightStatusBar">false</item>
+                  <item name="android:windowLightNavigationBar">false</item>
+                  <item name="android:enforceStatusBarContrast">false</item>
+                  <item name="android:enforceNavigationBarContrast">false</item>
+              </style>
+          </resources>
+          ''', encoding='utf-8')
+
+          java_url = json.dumps(web_url)
+          (java_dir / 'MainActivity.java').write_text(f'''package {package_name};
+
+          import android.app.Activity;
+          import android.content.ActivityNotFoundException;
+          import android.content.Intent;
+          import android.graphics.Color;
+          import android.net.Uri;
+          import android.os.Build;
+          import android.os.Bundle;
+          import android.view.View;
+          import android.view.ViewGroup;
+          import android.view.Window;
+          import android.view.WindowInsetsController;
+          import android.webkit.CookieManager;
+          import android.webkit.WebChromeClient;
+          import android.webkit.WebResourceRequest;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+          import android.widget.Toast;
+
+          public class MainActivity extends Activity {{
+              private static final String HOME_URL = {java_url};
+              private WebView webView;
+
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {{
+                  super.onCreate(savedInstanceState);
+                  configureNonFullscreenWindow();
+
+                  webView = new WebView(this);
+                  webView.setBackgroundColor(Color.BLACK);
+                  webView.setLayoutParams(new ViewGroup.LayoutParams(
+                      ViewGroup.LayoutParams.MATCH_PARENT,
+                      ViewGroup.LayoutParams.MATCH_PARENT
+                  ));
+                  setContentView(webView);
+
+                  WebSettings settings = webView.getSettings();
+                  settings.setJavaScriptEnabled(true);
+                  settings.setDomStorageEnabled(true);
+                  settings.setDatabaseEnabled(true);
+                  settings.setLoadWithOverviewMode(true);
+                  settings.setUseWideViewPort(true);
+                  settings.setSupportZoom(true);
+                  settings.setBuiltInZoomControls(true);
+                  settings.setDisplayZoomControls(false);
+                  settings.setMediaPlaybackRequiresUserGesture(false);
+                  settings.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
+
+                  CookieManager.getInstance().setAcceptCookie(true);
+                  CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
+                  webView.setWebChromeClient(new WebChromeClient());
+                  webView.setWebViewClient(new WebViewClient() {{
+                      @Override
+                      public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {{
+                          return openUrl(request.getUrl().toString());
+                      }}
+
+                      @Override
+                      public boolean shouldOverrideUrlLoading(WebView view, String url) {{
+                          return openUrl(url);
+                      }}
+                  }});
+                  webView.setDownloadListener((url, userAgent, contentDisposition, mimeType, contentLength) -> {{
+                      try {{
+                          startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+                      }} catch (Exception error) {{
+                          Toast.makeText(this, "Tidak dapat membuka unduhan", Toast.LENGTH_SHORT).show();
+                      }}
+                  }});
+
+                  if (savedInstanceState == null) webView.loadUrl(HOME_URL);
+                  else webView.restoreState(savedInstanceState);
+              }}
+
+              private void configureNonFullscreenWindow() {{
+                  Window window = getWindow();
+                  window.setStatusBarColor(Color.BLACK);
+                  window.setNavigationBarColor(Color.BLACK);
+
+                  // Konten WebView harus berhenti di bawah status bar dan di atas navigation bar.
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {{
+                      window.setDecorFitsSystemWindows(true);
+                      WindowInsetsController controller = window.getInsetsController();
+                      if (controller != null) {{
+                          controller.setSystemBarsAppearance(
+                              0,
+                              WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
+                                  | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+                          );
+                      }}
+                  }} else {{
+                      View decor = window.getDecorView();
+                      int flags = decor.getSystemUiVisibility();
+                      flags &= ~View.SYSTEM_UI_FLAG_FULLSCREEN;
+                      flags &= ~View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN;
+                      flags &= ~View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION;
+                      flags &= ~View.SYSTEM_UI_FLAG_IMMERSIVE;
+                      flags &= ~View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY;
+                      flags &= ~View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {{
+                          flags &= ~View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+                      }}
+                      decor.setSystemUiVisibility(flags);
+                  }}
+
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {{
+                      window.setStatusBarContrastEnforced(false);
+                      window.setNavigationBarContrastEnforced(false);
+                  }}
+              }}
+
+              private boolean openUrl(String url) {{
+                  if (url == null) return false;
+                  Uri uri = Uri.parse(url);
+                  String scheme = uri.getScheme();
+                  if (scheme == null || scheme.equalsIgnoreCase("http") || scheme.equalsIgnoreCase("https")) {{
+                      return false;
+                  }}
+                  try {{
+                      Intent intent;
+                      if (url.startsWith("intent://")) intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME);
+                      else intent = new Intent(Intent.ACTION_VIEW, uri);
+                      startActivity(intent);
+                  }} catch (ActivityNotFoundException error) {{
+                      Toast.makeText(this, "Aplikasi untuk membuka tautan tidak tersedia", Toast.LENGTH_SHORT).show();
+                  }} catch (Exception error) {{
+                      Toast.makeText(this, "Tautan tidak dapat dibuka", Toast.LENGTH_SHORT).show();
+                  }}
+                  return true;
+              }}
+
+              @Override
+              protected void onSaveInstanceState(Bundle outState) {{
+                  webView.saveState(outState);
+                  super.onSaveInstanceState(outState);
+              }}
+
+              @Override
+              public void onBackPressed() {{
+                  if (webView != null && webView.canGoBack()) webView.goBack();
+                  else super.onBackPressed();
+              }}
+
+              @Override
+              protected void onDestroy() {{
+                  if (webView != null) {{
+                      webView.stopLoading();
+                      webView.setWebChromeClient(null);
+                      webView.setWebViewClient(null);
+                      webView.destroy();
+                  }}
+                  super.onDestroy();
+              }}
+          }}
+          ''', encoding='utf-8')
+          print(f'✅ WebView project dibuat: {app_name} / {package_name} / {web_url}')
+          PYEOF
+
+      - name: Install Android SDK 35
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Generate Gradle Wrapper
+        run: |
+          set -e
+          cd android
+          GRADLE_VERSION="8.7"
+          curl -fL -o "/tmp/gradle-${GRADLE_VERSION}-bin.zip" "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip"
+          unzip -q "/tmp/gradle-${GRADLE_VERSION}-bin.zip" -d /tmp/
+          "/tmp/gradle-${GRADLE_VERSION}/bin/gradle" wrapper --gradle-version "$GRADLE_VERSION"
+          chmod +x gradlew
+
+      - name: Generate App Icons
+        run: |
+          python3 - <<'PYEOF'
+          from PIL import Image
+          from pathlib import Path
+
+          source = Image.open('uploads/web_icon.bin').convert('RGBA')
+          side = min(source.size)
+          left = (source.width - side) // 2
+          top = (source.height - side) // 2
+          source = source.crop((left, top, left + side, top + side))
+
+          sizes = {
+              'mipmap-mdpi': 48,
+              'mipmap-hdpi': 72,
+              'mipmap-xhdpi': 96,
+              'mipmap-xxhdpi': 144,
+              'mipmap-xxxhdpi': 192,
+          }
+          for folder, size in sizes.items():
+              target = Path('android/app/src/main/res') / folder
+              target.mkdir(parents=True, exist_ok=True)
+              icon = source.resize((size, size), Image.Resampling.LANCZOS)
+              icon.save(target / 'ic_launcher.png')
+              icon.save(target / 'ic_launcher_round.png')
+          print('✅ Logo dipasang sebagai ikon APK')
+          PYEOF
+
+      - name: Build APK
+        run: |
+          set -e
+          cd android
+          if [ "$BUILD_TYPE" = "debug" ]; then
+            ./gradlew assembleDebug --no-daemon --stacktrace
+            APK_SRC=$(find app/build/outputs/apk/debug/ -name "*.apk" | head -1)
+          else
+            ./gradlew assembleRelease --no-daemon --stacktrace
+            APK_SRC=$(find app/build/outputs/apk/release/ -name "*.apk" | head -1)
+          fi
+          test -n "$APK_SRC" || { echo "❌ APK tidak ditemukan"; exit 1; }
+          mkdir -p ../output
+          cp "$APK_SRC" "../output/${APK_NAME}.apk"
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APK_NAME }}
+          path: output/${{ env.APK_NAME }}.apk
+          retention-days: 30
