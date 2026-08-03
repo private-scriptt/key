@@ -1,0 +1,153 @@
+name: Build Flutter ZIP APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      apk_name:
+        description: Nama APK Output
+        required: true
+        default: Flutter-App
+      build_type:
+        description: Tipe Build
+        required: true
+        default: release
+        type: choice
+        options:
+          - release
+          - debug
+
+env:
+  APK_NAME: ${{ github.event.inputs.apk_name || 'Flutter-App' }}
+  BUILD_TYPE: ${{ github.event.inputs.build_type || 'release' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: temurin
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Show Build Environment
+        run: |
+          set -e
+          flutter --version
+          java -version
+          echo "APK Name   : $APK_NAME"
+          echo "Build Type : $BUILD_TYPE"
+
+      - name: Extract Flutter Project ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ ! -f "uploads/latest_project.zip" ]; then
+            echo "uploads/latest_project.zip tidak ditemukan"
+            exit 1
+          fi
+
+          rm -rf extracted_flutter flutter_project
+          mkdir -p extracted_flutter
+          unzip -q -o uploads/latest_project.zip -d extracted_flutter
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import shutil
+
+          extract_root = Path('extracted_flutter')
+          candidates = []
+
+          for pubspec in extract_root.rglob('pubspec.yaml'):
+              project = pubspec.parent
+              if any(part in {'.dart_tool', 'build', '.pub-cache'} for part in project.parts):
+                  continue
+              score = (
+                  0 if (project / 'lib/main.dart').is_file() else 1,
+                  len(project.relative_to(extract_root).parts),
+                  str(project),
+              )
+              candidates.append((score, project))
+
+          if not candidates:
+              raise SystemExit('pubspec.yaml tidak ditemukan di dalam ZIP')
+
+          candidates.sort(key=lambda item: item[0])
+          source = candidates[0][1]
+
+          if not (source / 'lib').is_dir():
+              raise SystemExit(f'Folder lib tidak ditemukan pada project Flutter: {source}')
+
+          target = Path('flutter_project')
+          if target.exists():
+              shutil.rmtree(target)
+          shutil.copytree(source, target, symlinks=True)
+          print(f'Project Flutter dipilih: {source}')
+          PY
+
+          rm -rf extracted_flutter
+          test -f flutter_project/pubspec.yaml
+          test -d flutter_project/lib
+
+      - name: Prepare Flutter Project
+        working-directory: flutter_project
+        run: |
+          set -euo pipefail
+
+          if [ ! -d android ]; then
+            echo "Folder android tidak ditemukan; membuat platform Android..."
+            flutter create --platforms=android .
+          fi
+
+          flutter pub get
+
+      - name: Build Flutter APK
+        working-directory: flutter_project
+        run: |
+          set -euo pipefail
+
+          if [ "$BUILD_TYPE" = "debug" ]; then
+            flutter build apk --debug
+            APK_SOURCE="build/app/outputs/flutter-apk/app-debug.apk"
+          else
+            flutter build apk --release
+            APK_SOURCE="build/app/outputs/flutter-apk/app-release.apk"
+          fi
+
+          if [ ! -f "$APK_SOURCE" ]; then
+            echo "Build selesai tetapi APK tidak ditemukan"
+            find build/app/outputs -type f -name '*.apk' -print 2>/dev/null || true
+            exit 1
+          fi
+
+          mkdir -p ../output
+          cp "$APK_SOURCE" "../output/${APK_NAME}.apk"
+
+      - name: Verify APK Output
+        run: |
+          set -euo pipefail
+          test -f "output/${APK_NAME}.apk"
+          ls -lh "output/${APK_NAME}.apk"
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APK_NAME }}
+          path: output/${{ env.APK_NAME }}.apk
+          retention-days: 30
+          if-no-files-found: error
