@@ -1,0 +1,408 @@
+name: Build Flutter Web to APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      apk_name:
+        description: 'Nama APK Output'
+        required: true
+        default: 'WebApp'
+      build_type:
+        description: 'Tipe Build'
+        required: true
+        default: 'release'
+        type: choice
+        options:
+          - release
+          - debug
+
+env:
+  APK_NAME: ${{ github.event.inputs.apk_name || 'WebApp' }}
+  BUILD_TYPE: ${{ github.event.inputs.build_type || 'release' }}
+
+jobs:
+  build-flutter-web-apk:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Flutter stable
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install image tools
+        run: pip install Pillow
+
+      - name: Validate inputs and prepare metadata
+        run: |
+          set -euo pipefail
+          test -f uploads/web_config.json || { echo "❌ uploads/web_config.json tidak ditemukan"; exit 1; }
+          test -f uploads/web_icon.bin || { echo "❌ uploads/web_icon.bin tidak ditemukan"; exit 1; }
+
+          python3 - <<'PYEOF'
+          import json
+          import re
+          import shlex
+          from pathlib import Path
+          from PIL import Image, ImageOps
+
+          config_path = Path('uploads/web_config.json')
+          config = json.loads(config_path.read_text(encoding='utf-8'))
+
+          app_name = str(config.get('app_name', '')).strip()[:40]
+          web_url = str(config.get('web_url', '')).strip()
+          package_name = str(config.get('package_name', '')).strip().lower()
+
+          if not app_name:
+              raise SystemExit('Nama aplikasi kosong')
+          if not re.fullmatch(r'[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*){1,5}', package_name):
+              raise SystemExit('Package name tidak valid')
+          if not re.match(r'^https?://[^\s]+$', web_url, re.I):
+              raise SystemExit('URL website tidak valid')
+
+          raw_apk_name = str(__import__('os').environ.get('APK_NAME', 'WebApp'))
+          safe_apk_name = re.sub(r'[<>:"/\\|?*\x00-\x1F]+', '-', raw_apk_name)
+          safe_apk_name = re.sub(r'\s+', ' ', safe_apk_name).strip()[:60] or 'WebApp'
+
+          Path('build_meta.env').write_text(
+              '\n'.join([
+                  f'APP_NAME={shlex.quote(app_name)}',
+                  f'WEB_URL={shlex.quote(web_url)}',
+                  f'PACKAGE_NAME={shlex.quote(package_name)}',
+                  f'SAFE_APK_NAME={shlex.quote(safe_apk_name)}',
+              ]) + '\n',
+              encoding='utf-8'
+          )
+
+          source = Image.open('uploads/web_icon.bin').convert('RGBA')
+          source = ImageOps.exif_transpose(source)
+          side = min(source.size)
+          left = (source.width - side) // 2
+          top = (source.height - side) // 2
+          source = source.crop((left, top, left + side, top + side))
+          source = source.resize((1024, 1024), Image.Resampling.LANCZOS)
+          Path('prepared').mkdir(exist_ok=True)
+          source.save('prepared/icon.png', format='PNG', optimize=True)
+
+          print(f'✅ Konfigurasi valid: {app_name} / {package_name} / {web_url}')
+          PYEOF
+
+      - name: Create Flutter project
+        run: |
+          set -euo pipefail
+          rm -rf flutter_app
+          flutter create \
+            --platforms=android \
+            --org com.telegrambuilder \
+            --project-name web_wrapper \
+            flutter_app
+
+          cd flutter_app
+          flutter pub add webview_flutter url_launcher
+          flutter pub add --dev flutter_launcher_icons
+
+      - name: Generate Flutter WebView app
+        run: |
+          set -euo pipefail
+          set -a
+          source build_meta.env
+          set +a
+
+          python3 - <<'PYEOF'
+          import json
+          import os
+          import re
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          root = Path('flutter_app')
+          app_name = os.environ['APP_NAME']
+          web_url = os.environ['WEB_URL']
+          package_name = os.environ['PACKAGE_NAME']
+
+          main_dart = f'''import 'package:flutter/material.dart';
+          import 'package:url_launcher/url_launcher.dart';
+          import 'package:webview_flutter/webview_flutter.dart';
+
+          const String appName = {json.dumps(app_name, ensure_ascii=False)};
+          const String homeUrl = {json.dumps(web_url, ensure_ascii=False)};
+
+          void main() {{
+            WidgetsFlutterBinding.ensureInitialized();
+            runApp(const WebWrapperApp());
+          }}
+
+          class WebWrapperApp extends StatelessWidget {{
+            const WebWrapperApp({{super.key}});
+
+            @override
+            Widget build(BuildContext context) {{
+              return MaterialApp(
+                title: appName,
+                debugShowCheckedModeBanner: false,
+                theme: ThemeData(
+                  colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
+                  useMaterial3: true,
+                ),
+                home: const WebPage(),
+              );
+            }}
+          }}
+
+          class WebPage extends StatefulWidget {{
+            const WebPage({{super.key}});
+
+            @override
+            State<WebPage> createState() => _WebPageState();
+          }}
+
+          class _WebPageState extends State<WebPage> {{
+            late final WebViewController _controller;
+            int _progress = 0;
+            bool _hasMainFrameError = false;
+
+            @override
+            void initState() {{
+              super.initState();
+              _controller = WebViewController()
+                ..setJavaScriptMode(JavaScriptMode.unrestricted)
+                ..setBackgroundColor(Colors.white)
+                ..setNavigationDelegate(
+                  NavigationDelegate(
+                    onProgress: (value) {{
+                      if (mounted) setState(() => _progress = value);
+                    }},
+                    onPageStarted: (_) {{
+                      if (mounted) setState(() => _hasMainFrameError = false);
+                    }},
+                    onWebResourceError: (error) {{
+                      if (error.isForMainFrame == true && mounted) {{
+                        setState(() => _hasMainFrameError = true);
+                      }}
+                    }},
+                    onNavigationRequest: _handleNavigation,
+                  ),
+                )
+                ..loadRequest(Uri.parse(homeUrl));
+            }}
+
+            Future<NavigationDecision> _handleNavigation(
+              NavigationRequest request,
+            ) async {{
+              final uri = Uri.tryParse(request.url);
+              if (uri == null) return NavigationDecision.prevent;
+
+              final scheme = uri.scheme.toLowerCase();
+              if (scheme == 'http' || scheme == 'https') {{
+                return NavigationDecision.navigate;
+              }}
+
+              try {{
+                final opened = await launchUrl(
+                  uri,
+                  mode: LaunchMode.externalApplication,
+                );
+                if (!opened && mounted) {{
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Tautan tidak dapat dibuka')),
+                  );
+                }}
+              }} catch (_) {{
+                if (mounted) {{
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Aplikasi untuk membuka tautan tidak tersedia')),
+                  );
+                }}
+              }}
+              return NavigationDecision.prevent;
+            }}
+
+            Future<bool> _handleBack() async {{
+              if (await _controller.canGoBack()) {{
+                await _controller.goBack();
+                return false;
+              }}
+              return true;
+            }}
+
+            @override
+            Widget build(BuildContext context) {{
+              return WillPopScope(
+                onWillPop: _handleBack,
+                child: Scaffold(
+                  body: SafeArea(
+                    child: Stack(
+                      children: [
+                        if (!_hasMainFrameError)
+                          WebViewWidget(controller: _controller),
+                        if (_hasMainFrameError)
+                          Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(24),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.wifi_off_rounded, size: 64),
+                                  const SizedBox(height: 16),
+                                  const Text(
+                                    'Website tidak dapat dimuat',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  const Text(
+                                    'Periksa koneksi internet lalu coba lagi.',
+                                    textAlign: TextAlign.center,
+                                  ),
+                                  const SizedBox(height: 20),
+                                  FilledButton.icon(
+                                    onPressed: () {{
+                                      setState(() => _hasMainFrameError = false);
+                                      _controller.reload();
+                                    }},
+                                    icon: const Icon(Icons.refresh),
+                                    label: const Text('Coba Lagi'),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        if (_progress < 100 && !_hasMainFrameError)
+                          LinearProgressIndicator(value: _progress / 100),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }}
+          }}
+          '''
+          # Hilangkan indentasi heredoc agar Dart tetap rapi.
+          lines = main_dart.splitlines()
+          normalized = '\n'.join(line[10:] if line.startswith('          ') else line for line in lines) + '\n'
+          (root / 'lib/main.dart').write_text(normalized, encoding='utf-8')
+
+          # Pasang ikon yang sudah dikonversi menjadi PNG.
+          assets = root / 'assets'
+          assets.mkdir(exist_ok=True)
+          (assets / 'icon.png').write_bytes(Path('prepared/icon.png').read_bytes())
+          (root / 'flutter_launcher_icons.yaml').write_text('''flutter_launcher_icons:
+            android: true
+            ios: false
+            image_path: assets/icon.png
+            adaptive_icon_background: "#FFFFFF"
+            adaptive_icon_foreground: assets/icon.png
+            min_sdk_android: 23
+          ''', encoding='utf-8')
+
+          # Sesuaikan applicationId, namespace, dan minSdk untuk template Flutter
+          # baik yang memakai Kotlin DSL maupun Groovy.
+          gradle_candidates = [
+              root / 'android/app/build.gradle.kts',
+              root / 'android/app/build.gradle',
+          ]
+          gradle_path = next((p for p in gradle_candidates if p.exists()), None)
+          if gradle_path is None:
+              raise SystemExit('File Gradle aplikasi Flutter tidak ditemukan')
+
+          gradle = gradle_path.read_text(encoding='utf-8')
+          if gradle_path.suffix == '.kts':
+              gradle = re.sub(r'namespace\s*=\s*"[^"]+"', f'namespace = "{package_name}"', gradle, count=1)
+              gradle = re.sub(r'applicationId\s*=\s*"[^"]+"', f'applicationId = "{package_name}"', gradle, count=1)
+              gradle = re.sub(r'minSdk\s*=\s*[^\n]+', 'minSdk = 23', gradle, count=1)
+          else:
+              gradle = re.sub(r'namespace\s+(?:=\s*)?["\'][^"\']+["\']', f'namespace "{package_name}"', gradle, count=1)
+              gradle = re.sub(r'applicationId\s+(?:=\s*)?["\'][^"\']+["\']', f'applicationId "{package_name}"', gradle, count=1)
+              gradle = re.sub(r'minSdk(?:Version)?\s+(?:=\s*)?[^\n]+', 'minSdkVersion 23', gradle, count=1)
+          gradle_path.write_text(gradle, encoding='utf-8')
+
+          # Buat MainActivity pada namespace/package yang diminta pengguna.
+          for source_root in [root / 'android/app/src/main/kotlin', root / 'android/app/src/main/java']:
+              if source_root.exists():
+                  for old in source_root.rglob('MainActivity.*'):
+                      old.unlink()
+          activity_dir = root / 'android/app/src/main/kotlin' / Path(package_name.replace('.', '/'))
+          activity_dir.mkdir(parents=True, exist_ok=True)
+          (activity_dir / 'MainActivity.kt').write_text(
+              f'''package {package_name}\n\nimport io.flutter.embedding.android.FlutterActivity\n\nclass MainActivity : FlutterActivity()\n''',
+              encoding='utf-8'
+          )
+
+          # Perbarui manifest: nama aplikasi, internet, HTTP opsional, dan activity.
+          manifest_path = root / 'android/app/src/main/AndroidManifest.xml'
+          android_ns = 'http://schemas.android.com/apk/res/android'
+          ET.register_namespace('android', android_ns)
+          tree = ET.parse(manifest_path)
+          manifest = tree.getroot()
+          permission_name = f'{{{android_ns}}}name'
+          if not any(
+              item.tag == 'uses-permission' and item.attrib.get(permission_name) == 'android.permission.INTERNET'
+              for item in manifest
+          ):
+              permission = ET.Element('uses-permission')
+              permission.set(permission_name, 'android.permission.INTERNET')
+              manifest.insert(0, permission)
+
+          application = manifest.find('application')
+          if application is None:
+              raise SystemExit('Elemen application tidak ditemukan pada AndroidManifest.xml')
+          application.set(f'{{{android_ns}}}label', app_name)
+          application.set(f'{{{android_ns}}}usesCleartextTraffic', 'true')
+          tree.write(manifest_path, encoding='utf-8', xml_declaration=True)
+
+          print('✅ Project Flutter WebView berhasil dibuat')
+          PYEOF
+
+          rm -rf flutter_app/test
+          cd flutter_app
+          dart format lib/main.dart
+          dart run flutter_launcher_icons
+          flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Build Flutter APK
+        run: |
+          set -euo pipefail
+          source build_meta.env
+          cd flutter_app
+
+          if [ "$BUILD_TYPE" = "debug" ]; then
+            flutter build apk --debug
+            APK_SRC="build/app/outputs/flutter-apk/app-debug.apk"
+          else
+            flutter build apk --release
+            APK_SRC="build/app/outputs/flutter-apk/app-release.apk"
+          fi
+
+          test -f "$APK_SRC" || { echo "❌ APK Flutter tidak ditemukan"; exit 1; }
+          mkdir -p ../output
+          cp "$APK_SRC" "../output/${SAFE_APK_NAME}.apk"
+          echo "APK_OUTPUT=output/${SAFE_APK_NAME}.apk" >> "$GITHUB_ENV"
+          echo "ARTIFACT_NAME=${SAFE_APK_NAME}" >> "$GITHUB_ENV"
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: ${{ env.APK_OUTPUT }}
+          retention-days: 30
