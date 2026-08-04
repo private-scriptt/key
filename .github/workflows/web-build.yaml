@@ -1,0 +1,984 @@
+name: Build Web to APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      apk_name:
+        description: 'Nama APK Output'
+        required: true
+        default: 'WebApp'
+      build_type:
+        description: 'Tipe Build'
+        required: true
+        default: 'release'
+        type: choice
+        options:
+          - release
+          - debug
+
+env:
+  APK_NAME: ${{ github.event.inputs.apk_name || 'WebApp' }}
+  BUILD_TYPE: ${{ github.event.inputs.build_type || 'release' }}
+
+jobs:
+  build-web-apk:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install image tools
+        run: pip install Pillow
+
+      - name: Validate Web APK inputs
+        run: |
+          set -e
+          test -f uploads/web_config.json || { echo "❌ uploads/web_config.json tidak ditemukan"; exit 1; }
+          test -f uploads/web_icon.bin || { echo "❌ uploads/web_icon.bin tidak ditemukan"; exit 1; }
+
+      - name: Generate WebView Android Project
+        run: |
+          set -e
+          rm -rf android
+          python3 - <<'PYEOF'
+          import json
+          import re
+          from pathlib import Path
+          from xml.sax.saxutils import escape
+
+          config = json.loads(Path('uploads/web_config.json').read_text(encoding='utf-8'))
+          app_name = str(config.get('app_name', '')).strip()[:40]
+          web_url = str(config.get('web_url', '')).strip()
+          package_name = str(config.get('package_name', '')).strip().lower()
+
+          if not app_name:
+              raise SystemExit('Nama aplikasi kosong')
+          if not re.fullmatch(r'[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*){1,5}', package_name):
+              raise SystemExit('Package name tidak valid')
+          if not re.match(r'^https?://', web_url, re.I):
+              raise SystemExit('URL website tidak valid')
+
+          root = Path('android')
+          java_dir = root / 'app/src/main/java' / Path(package_name.replace('.', '/'))
+          values_dir = root / 'app/src/main/res/values'
+          java_dir.mkdir(parents=True, exist_ok=True)
+          values_dir.mkdir(parents=True, exist_ok=True)
+
+          (root / 'settings.gradle').write_text(
+              "pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }\n"
+              "dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }\n"
+              "rootProject.name = 'WebToApk'\n"
+              "include ':app'\n",
+              encoding='utf-8'
+          )
+
+          (root / 'build.gradle').write_text(
+              "plugins {\n    id 'com.android.application' version '8.6.1' apply false\n}\n",
+              encoding='utf-8'
+          )
+
+          (root / 'gradle.properties').write_text(
+              "org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8\n"
+              "android.useAndroidX=true\n"
+              "android.nonTransitiveRClass=true\n",
+              encoding='utf-8'
+          )
+
+          (root / 'app').mkdir(parents=True, exist_ok=True)
+          (root / 'app/build.gradle').write_text(f"""plugins {{
+              id 'com.android.application'
+          }}
+
+          android {{
+              namespace '{package_name}'
+              compileSdk 35
+
+              defaultConfig {{
+                  applicationId '{package_name}'
+                  minSdk 23
+                  targetSdk 35
+                  versionCode 1
+                  versionName '1.0'
+              }}
+
+              compileOptions {{
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }}
+
+              buildTypes {{
+                  release {{
+                      minifyEnabled false
+                      signingConfig signingConfigs.debug
+                  }}
+                  debug {{
+                      debuggable true
+                  }}
+              }}
+          }}
+          """, encoding='utf-8')
+
+          main_dir = root / 'app/src/main'
+          main_dir.mkdir(parents=True, exist_ok=True)
+          (main_dir / 'AndroidManifest.xml').write_text(f"""<?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+              <application
+                  android:allowBackup="true"
+                  android:hardwareAccelerated="true"
+                  android:icon="@mipmap/ic_launcher"
+                  android:roundIcon="@mipmap/ic_launcher_round"
+                  android:label="@string/app_name"
+                  android:usesCleartextTraffic="true"
+                  android:theme="@style/AppTheme">
+
+                  <activity
+                      android:name=".MainActivity"
+                      android:configChanges="keyboard|keyboardHidden|orientation|screenSize|smallestScreenSize|uiMode"
+                      android:exported="true"
+                      android:screenOrientation="unspecified"
+                      android:windowSoftInputMode="adjustResize">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          """, encoding='utf-8')
+
+          (values_dir / 'strings.xml').write_text(
+              f'<?xml version="1.0" encoding="utf-8"?>\n<resources><string name="app_name">{escape(app_name)}</string></resources>\n',
+              encoding='utf-8'
+          )
+
+          (values_dir / 'styles.xml').write_text('''<?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
+                  <item name="android:windowNoTitle">true</item>
+                  <item name="android:fontFamily">sans</item>
+                  <item name="android:windowActionModeOverlay">true</item>
+                  <item name="android:colorAccent">#E93455</item>
+                  <item name="android:windowBackground">#000000</item>
+                  <item name="android:statusBarColor">#000000</item>
+                  <item name="android:navigationBarColor">#000000</item>
+                  <item name="android:windowLightStatusBar">false</item>
+                  <item name="android:windowLightNavigationBar">false</item>
+                  <item name="android:enforceStatusBarContrast">false</item>
+                  <item name="android:enforceNavigationBarContrast">false</item>
+              </style>
+          </resources>
+          ''', encoding='utf-8')
+
+          java_url = json.dumps(web_url)
+          java_app_name = json.dumps(app_name)
+
+          (java_dir / 'MainActivity.java').write_text(f'''package {package_name};
+
+          import android.app.Activity;
+          import android.content.ActivityNotFoundException;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.graphics.Color;
+          import android.graphics.Typeface;
+          import android.graphics.drawable.GradientDrawable;
+          import android.net.ConnectivityManager;
+          import android.net.Network;
+          import android.net.NetworkCapabilities;
+          import android.net.NetworkRequest;
+          import android.net.Uri;
+          import android.os.Build;
+          import android.os.Bundle;
+          import android.os.Handler;
+          import android.os.Looper;
+          import android.view.Gravity;
+          import android.view.View;
+          import android.view.ViewGroup;
+          import android.view.WindowInsets;
+          import android.view.WindowInsetsController;
+          import android.webkit.CookieManager;
+          import android.webkit.WebChromeClient;
+          import android.webkit.WebResourceError;
+          import android.webkit.WebResourceRequest;
+          import android.webkit.WebResourceResponse;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+          import android.widget.FrameLayout;
+          import android.widget.ImageView;
+          import android.widget.LinearLayout;
+          import android.widget.Space;
+          import android.widget.ScrollView;
+          import android.widget.TextView;
+          import android.widget.Toast;
+
+          import java.net.HttpURLConnection;
+          import java.net.URL;
+          import java.util.Locale;
+          import java.util.concurrent.ExecutorService;
+          import java.util.concurrent.Executors;
+
+          public class MainActivity extends Activity {{
+              private static final String HOME_URL = {java_url};
+              private static final String APP_NAME = {java_app_name};
+              private static final long CHECK_INTERVAL_MS = 15_000L;
+              private static final int CONNECT_TIMEOUT_MS = 8_000;
+              private static final int READ_TIMEOUT_MS = 8_000;
+
+              private final Handler mainHandler = new Handler(Looper.getMainLooper());
+              private final ExecutorService networkExecutor = Executors.newSingleThreadExecutor();
+
+              private FrameLayout rootView;
+              private FrameLayout contentHost;
+              private WebView webView;
+              private ScrollView connectionView;
+              private TextView chipText;
+              private TextView titleText;
+              private TextView descriptionText;
+              private TextView detailText;
+              private TextView internetStatusText;
+              private TextView serverStatusText;
+              private TextView retryButton;
+
+              private ConnectivityManager connectivityManager;
+              private ConnectivityManager.NetworkCallback networkCallback;
+              private volatile boolean checking = false;
+              private boolean pageLoaded = false;
+
+              private final Runnable periodicCheck = () -> checkConnection(false);
+              private final Runnable networkChangedCheck = () -> checkConnection(false);
+
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {{
+                  super.onCreate(savedInstanceState);
+                  configureSystemBars();
+                  buildScreen();
+                  configureWebView();
+                  registerNetworkWatcher();
+
+                  if (savedInstanceState != null) {{
+                      webView.restoreState(savedInstanceState);
+                  }}
+                  checkConnection(true);
+              }}
+
+              private void configureSystemBars() {{
+                  getWindow().setStatusBarColor(Color.BLACK);
+                  getWindow().setNavigationBarColor(Color.BLACK);
+
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {{
+                      getWindow().setDecorFitsSystemWindows(false);
+                      WindowInsetsController controller = getWindow().getInsetsController();
+                      if (controller != null) {{
+                          controller.setSystemBarsAppearance(
+                              0,
+                              WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
+                                  | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+                          );
+                      }}
+                  }} else {{
+                      int flags = getWindow().getDecorView().getSystemUiVisibility();
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {{
+                          flags &= ~View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+                      }}
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {{
+                          flags &= ~View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+                      }}
+                      getWindow().getDecorView().setSystemUiVisibility(flags);
+                  }}
+              }}
+
+              private void buildScreen() {{
+                  rootView = new FrameLayout(this);
+                  rootView.setBackgroundColor(Color.BLACK);
+
+                  contentHost = new FrameLayout(this);
+                  contentHost.setBackgroundColor(Color.BLACK);
+                  rootView.addView(contentHost, matchParent());
+
+                  webView = new WebView(this);
+                  webView.setBackgroundColor(Color.WHITE);
+                  contentHost.addView(webView, matchParent());
+
+                  connectionView = createConnectionView();
+                  contentHost.addView(connectionView, matchParent());
+
+                  setContentView(rootView);
+
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {{
+                      rootView.setOnApplyWindowInsetsListener((view, insets) -> {{
+                          android.graphics.Insets bars = insets.getInsets(
+                              WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout()
+                          );
+                          contentHost.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+                          return insets;
+                      }});
+                      rootView.requestApplyInsets();
+                  }}
+              }}
+
+              private void configureWebView() {{
+                  WebSettings settings = webView.getSettings();
+                  settings.setJavaScriptEnabled(true);
+                  settings.setDomStorageEnabled(true);
+                  settings.setDatabaseEnabled(true);
+                  settings.setLoadWithOverviewMode(true);
+                  settings.setUseWideViewPort(true);
+                  settings.setSupportZoom(true);
+                  settings.setBuiltInZoomControls(true);
+                  settings.setDisplayZoomControls(false);
+                  settings.setMediaPlaybackRequiresUserGesture(false);
+                  settings.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
+
+                  CookieManager.getInstance().setAcceptCookie(true);
+                  CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
+
+                  webView.setWebChromeClient(new WebChromeClient());
+                  webView.setWebViewClient(new WebViewClient() {{
+                      @Override
+                      public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {{
+                          return openUrl(request.getUrl().toString());
+                      }}
+
+                      @Override
+                      public boolean shouldOverrideUrlLoading(WebView view, String url) {{
+                          return openUrl(url);
+                      }}
+
+                      @Override
+                      public void onPageFinished(WebView view, String url) {{
+                          pageLoaded = true;
+                          super.onPageFinished(view, url);
+                      }}
+
+                      @Override
+                      public void onReceivedError(
+                          WebView view,
+                          WebResourceRequest request,
+                          WebResourceError error
+                      ) {{
+                          super.onReceivedError(view, request, error);
+                          if (request != null && request.isForMainFrame()) {{
+                              pageLoaded = false;
+                              checkConnection(false);
+                          }}
+                      }}
+
+                      @Override
+                      public void onReceivedHttpError(
+                          WebView view,
+                          WebResourceRequest request,
+                          WebResourceResponse errorResponse
+                      ) {{
+                          super.onReceivedHttpError(view, request, errorResponse);
+                          if (request != null
+                              && request.isForMainFrame()
+                              && errorResponse != null
+                              && errorResponse.getStatusCode() >= 500) {{
+                              pageLoaded = false;
+                              showServerUnavailable("HTTP " + errorResponse.getStatusCode());
+                          }}
+                      }}
+                  }});
+
+                  webView.setDownloadListener((url, userAgent, contentDisposition, mimeType, contentLength) -> {{
+                      try {{
+                          startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+                      }} catch (Exception error) {{
+                          Toast.makeText(this, "Tidak dapat membuka unduhan", Toast.LENGTH_SHORT).show();
+                      }}
+                  }});
+              }}
+
+              private ScrollView createConnectionView() {{
+                  ScrollView scrollView = new ScrollView(this);
+                  scrollView.setFillViewport(true);
+                  scrollView.setBackgroundColor(Color.rgb(8, 0, 2));
+
+                  LinearLayout screen = new LinearLayout(this);
+                  screen.setOrientation(LinearLayout.VERTICAL);
+                  screen.setGravity(Gravity.CENTER_HORIZONTAL);
+                  screen.setPadding(dp(28), dp(28), dp(28), dp(28));
+                  screen.setBackgroundColor(Color.rgb(8, 0, 2));
+                  screen.setVisibility(View.VISIBLE);
+
+                  Space topSpace = new Space(this);
+                  screen.addView(topSpace, new LinearLayout.LayoutParams(1, dp(38)));
+
+                  TextView brand = makeText(APP_NAME.toUpperCase(Locale.ROOT), 13, Color.rgb(221, 119, 139));
+                  brand.setLetterSpacing(0.28f);
+                  screen.addView(brand, wrapCenter());
+
+                  Space s1 = new Space(this);
+                  screen.addView(s1, new LinearLayout.LayoutParams(1, dp(34)));
+
+                  FrameLayout iconShell = new FrameLayout(this);
+                  iconShell.setBackground(roundRect(Color.WHITE, Color.rgb(233, 52, 85), 2, 22));
+                  LinearLayout.LayoutParams iconShellParams = new LinearLayout.LayoutParams(dp(96), dp(96));
+                  iconShellParams.gravity = Gravity.CENTER_HORIZONTAL;
+                  screen.addView(iconShell, iconShellParams);
+
+                  ImageView icon = new ImageView(this);
+                  icon.setImageResource(getApplicationInfo().icon);
+                  icon.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+                  FrameLayout.LayoutParams iconParams = new FrameLayout.LayoutParams(dp(66), dp(66));
+                  iconParams.gravity = Gravity.CENTER;
+                  iconShell.addView(icon, iconParams);
+
+                  Space s2 = new Space(this);
+                  screen.addView(s2, new LinearLayout.LayoutParams(1, dp(28)));
+
+                  chipText = makeText("●   SERVER CONNECTING", 11, Color.rgb(235, 116, 137));
+                  chipText.setLetterSpacing(0.20f);
+                  chipText.setGravity(Gravity.CENTER);
+                  chipText.setPadding(dp(22), dp(11), dp(22), dp(11));
+                  chipText.setBackground(roundRect(Color.TRANSPARENT, Color.rgb(116, 30, 48), 1, 40));
+                  screen.addView(chipText, wrapCenter());
+
+                  Space s3 = new Space(this);
+                  screen.addView(s3, new LinearLayout.LayoutParams(1, dp(24)));
+
+                  titleText = makeText("MEMERIKSA\nKONEKSI SERVER", 28, Color.rgb(255, 55, 88));
+                  titleText.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+                  titleText.setGravity(Gravity.CENTER);
+                  screen.addView(titleText, matchWidthWrap());
+
+                  Space s4 = new Space(this);
+                  screen.addView(s4, new LinearLayout.LayoutParams(1, dp(24)));
+
+                  LinearLayout infoCard = new LinearLayout(this);
+                  infoCard.setOrientation(LinearLayout.VERTICAL);
+                  infoCard.setGravity(Gravity.CENTER);
+                  infoCard.setPadding(dp(20), dp(24), dp(20), dp(24));
+                  infoCard.setBackground(roundRect(Color.rgb(19, 3, 7), Color.rgb(84, 25, 38), 1, 24));
+                  LinearLayout.LayoutParams infoCardParams = new LinearLayout.LayoutParams(
+                      ViewGroup.LayoutParams.MATCH_PARENT,
+                      ViewGroup.LayoutParams.WRAP_CONTENT
+                  );
+                  infoCardParams.setMargins(0, 0, 0, dp(18));
+                  screen.addView(infoCard, infoCardParams);
+
+                  detailText = makeText(hostLabel(HOME_URL), 11, Color.rgb(151, 94, 107));
+                  detailText.setLetterSpacing(0.20f);
+                  detailText.setGravity(Gravity.CENTER);
+                  infoCard.addView(detailText, matchWidthWrap());
+
+                  LinearLayout signal = new LinearLayout(this);
+                  signal.setGravity(Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+                  LinearLayout.LayoutParams signalParams = new LinearLayout.LayoutParams(
+                      ViewGroup.LayoutParams.WRAP_CONTENT,
+                      dp(52)
+                  );
+                  signalParams.setMargins(0, dp(12), 0, dp(12));
+                  infoCard.addView(signal, signalParams);
+                  int[] barHeights = new int[]{{12, 24, 40, 29, 16}};
+                  for (int height : barHeights) {{
+                      View bar = new View(this);
+                      bar.setBackground(roundRect(Color.rgb(196, 42, 70), Color.TRANSPARENT, 0, 8));
+                      LinearLayout.LayoutParams barParams = new LinearLayout.LayoutParams(dp(8), dp(height));
+                      barParams.setMargins(dp(4), 0, dp(4), 0);
+                      signal.addView(bar, barParams);
+                  }}
+
+                  descriptionText = makeText(
+                      "Aplikasi sedang memeriksa internet dan status server.",
+                      14,
+                      Color.rgb(185, 155, 162)
+                  );
+                  descriptionText.setGravity(Gravity.CENTER);
+                  infoCard.addView(descriptionText, matchWidthWrap());
+
+                  LinearLayout statusCard = new LinearLayout(this);
+                  statusCard.setOrientation(LinearLayout.VERTICAL);
+                  statusCard.setPadding(dp(20), dp(10), dp(20), dp(10));
+                  statusCard.setBackground(roundRect(Color.rgb(16, 3, 6), Color.rgb(74, 22, 34), 1, 22));
+                  LinearLayout.LayoutParams statusCardParams = new LinearLayout.LayoutParams(
+                      ViewGroup.LayoutParams.MATCH_PARENT,
+                      ViewGroup.LayoutParams.WRAP_CONTENT
+                  );
+                  statusCardParams.setMargins(0, 0, 0, dp(20));
+                  screen.addView(statusCard, statusCardParams);
+
+                  internetStatusText = addStatusRow(statusCard, "●   KONEKSI INTERNET", true);
+                  serverStatusText = addStatusRow(statusCard, "●   STATUS SERVER", false);
+
+                  retryButton = makeText("SEDANG MEMERIKSA", 13, Color.rgb(152, 91, 104));
+                  retryButton.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+                  retryButton.setLetterSpacing(0.20f);
+                  retryButton.setGravity(Gravity.CENTER);
+                  retryButton.setPadding(dp(18), dp(20), dp(18), dp(20));
+                  retryButton.setBackground(roundRect(Color.rgb(48, 5, 14), Color.rgb(123, 27, 47), 1, 22));
+                  retryButton.setOnClickListener(view -> checkConnection(true));
+                  screen.addView(retryButton, new LinearLayout.LayoutParams(
+                      ViewGroup.LayoutParams.MATCH_PARENT,
+                      ViewGroup.LayoutParams.WRAP_CONTENT
+                  ));
+
+                  Space s5 = new Space(this);
+                  screen.addView(s5, new LinearLayout.LayoutParams(1, dp(28)));
+
+                  TextView footer = makeText("PEMERIKSAAN OTOMATIS SETIAP 15 DETIK", 10, Color.rgb(111, 75, 83));
+                  footer.setLetterSpacing(0.26f);
+                  footer.setGravity(Gravity.CENTER);
+                  screen.addView(footer, matchWidthWrap());
+
+                  scrollView.addView(screen, new ScrollView.LayoutParams(
+                      ViewGroup.LayoutParams.MATCH_PARENT,
+                      ViewGroup.LayoutParams.WRAP_CONTENT
+                  ));
+                  return scrollView;
+              }}
+
+              private TextView addStatusRow(LinearLayout parent, String label, boolean addDivider) {{
+                  LinearLayout row = new LinearLayout(this);
+                  row.setOrientation(LinearLayout.HORIZONTAL);
+                  row.setGravity(Gravity.CENTER_VERTICAL);
+                  row.setPadding(0, dp(13), 0, dp(13));
+                  parent.addView(row, new LinearLayout.LayoutParams(
+                      ViewGroup.LayoutParams.MATCH_PARENT,
+                      ViewGroup.LayoutParams.WRAP_CONTENT
+                  ));
+
+                  TextView labelText = makeText(label, 10, Color.rgb(164, 112, 124));
+                  labelText.setLetterSpacing(0.20f);
+                  LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+                  row.addView(labelText, labelParams);
+
+                  TextView valueText = makeText("CHECKING", 10, Color.rgb(232, 175, 94));
+                  valueText.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+                  valueText.setLetterSpacing(0.15f);
+                  row.addView(valueText, new LinearLayout.LayoutParams(
+                      ViewGroup.LayoutParams.WRAP_CONTENT,
+                      ViewGroup.LayoutParams.WRAP_CONTENT
+                  ));
+
+                  if (addDivider) {{
+                      View divider = new View(this);
+                      divider.setBackgroundColor(Color.rgb(55, 18, 27));
+                      parent.addView(divider, new LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT,
+                          dp(1)
+                      ));
+                  }}
+                  return valueText;
+              }}
+
+              private void registerNetworkWatcher() {{
+                  connectivityManager = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+                  if (connectivityManager == null) return;
+
+                  networkCallback = new ConnectivityManager.NetworkCallback() {{
+                      @Override
+                      public void onAvailable(Network network) {{
+                          requestNetworkChangedCheck();
+                      }}
+
+                      @Override
+                      public void onLost(Network network) {{
+                          requestNetworkChangedCheck();
+                      }}
+
+                      @Override
+                      public void onCapabilitiesChanged(Network network, NetworkCapabilities capabilities) {{
+                          requestNetworkChangedCheck();
+                      }}
+                  }};
+
+                  try {{
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {{
+                          connectivityManager.registerDefaultNetworkCallback(networkCallback);
+                      }} else {{
+                          NetworkRequest request = new NetworkRequest.Builder()
+                              .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                              .build();
+                          connectivityManager.registerNetworkCallback(request, networkCallback);
+                      }}
+                  }} catch (Exception ignored) {{
+                  }}
+              }}
+
+              private void requestNetworkChangedCheck() {{
+                  mainHandler.removeCallbacks(networkChangedCheck);
+                  mainHandler.postDelayed(networkChangedCheck, 600L);
+              }}
+
+              private void checkConnection(boolean showCheckingScreen) {{
+                  if (checking || isFinishing() || isDestroyed()) return;
+                  checking = true;
+                  mainHandler.removeCallbacks(periodicCheck);
+
+                  if (showCheckingScreen || connectionView.getVisibility() == View.VISIBLE) {{
+                      showChecking();
+                  }}
+
+                  networkExecutor.execute(() -> {{
+                      boolean internetAvailable = hasValidatedInternet();
+                      ServerResult serverResult = internetAvailable
+                          ? checkServer(HOME_URL)
+                          : new ServerResult(false, "Menunggu internet");
+
+                      mainHandler.post(() -> {{
+                          checking = false;
+                          if (isFinishing() || isDestroyed()) return;
+
+                          if (!internetAvailable) {{
+                              showNoInternet();
+                          }} else if (!serverResult.available) {{
+                              showServerUnavailable(serverResult.detail);
+                          }} else {{
+                              showOnline(serverResult.detail);
+                          }}
+
+                          mainHandler.postDelayed(periodicCheck, CHECK_INTERVAL_MS);
+                      }});
+                  }});
+              }}
+
+              private boolean hasValidatedInternet() {{
+                  try {{
+                      if (connectivityManager == null) return false;
+                      Network network = connectivityManager.getActiveNetwork();
+                      if (network == null) return false;
+                      NetworkCapabilities capabilities = connectivityManager.getNetworkCapabilities(network);
+                      return capabilities != null
+                          && capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                          && capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED);
+                  }} catch (Exception error) {{
+                      return false;
+                  }}
+              }}
+
+              private ServerResult checkServer(String startUrl) {{
+                  String currentUrl = startUrl;
+                  for (int redirect = 0; redirect < 5; redirect++) {{
+                      HttpURLConnection connection = null;
+                      try {{
+                          URL url = new URL(currentUrl);
+                          connection = (HttpURLConnection) url.openConnection();
+                          connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
+                          connection.setReadTimeout(READ_TIMEOUT_MS);
+                          connection.setUseCaches(false);
+                          connection.setInstanceFollowRedirects(false);
+                          connection.setRequestMethod("GET");
+                          connection.setRequestProperty("Cache-Control", "no-cache");
+                          connection.setRequestProperty("Pragma", "no-cache");
+                          connection.setRequestProperty("Range", "bytes=0-0");
+                          connection.setRequestProperty(
+                              "User-Agent",
+                              "Mozilla/5.0 (Linux; Android) AppleWebKit/537.36 Chrome Mobile Safari/537.36"
+                          );
+
+                          int code = connection.getResponseCode();
+                          if (code >= 300 && code < 400) {{
+                              String location = connection.getHeaderField("Location");
+                              if (location == null || location.trim().isEmpty()) {{
+                                  return new ServerResult(true, "HTTP " + code);
+                              }}
+                              currentUrl = new URL(url, location).toString();
+                              continue;
+                          }}
+
+                          if (code >= 200 && code < 500) {{
+                              return new ServerResult(true, "ONLINE • HTTP " + code);
+                          }}
+                          return new ServerResult(false, "HTTP " + code);
+                      }} catch (Exception error) {{
+                          String message = error.getClass().getSimpleName();
+                          if (error.getMessage() != null && !error.getMessage().trim().isEmpty()) {{
+                              message += ": " + error.getMessage();
+                          }}
+                          return new ServerResult(false, message);
+                      }} finally {{
+                          if (connection != null) connection.disconnect();
+                      }}
+                  }}
+                  return new ServerResult(false, "Terlalu banyak pengalihan URL");
+              }}
+
+              private void showChecking() {{
+                  connectionView.setVisibility(View.VISIBLE);
+                  webView.setVisibility(View.INVISIBLE);
+                  chipText.setText("●   SERVER CONNECTING");
+                  titleText.setText("MEMERIKSA\nKONEKSI SERVER");
+                  descriptionText.setText("Aplikasi sedang memeriksa internet dan status server.");
+                  detailText.setText(hostLabel(HOME_URL));
+                  setStatus(internetStatusText, "CHECKING", Color.rgb(232, 175, 94));
+                  setStatus(serverStatusText, "CHECKING", Color.rgb(232, 175, 94));
+                  setRetryState(false, "SEDANG MEMERIKSA");
+              }}
+
+              private void showNoInternet() {{
+                  connectionView.setVisibility(View.VISIBLE);
+                  webView.setVisibility(View.INVISIBLE);
+                  chipText.setText("●   INTERNET OFFLINE");
+                  titleText.setText("TIDAK ADA\nKONEKSI INTERNET");
+                  descriptionText.setText("Aktifkan data seluler atau Wi-Fi. Aplikasi akan mencoba kembali otomatis.");
+                  detailText.setText("DATA SELULER / WI-FI TIDAK TERHUBUNG");
+                  setStatus(internetStatusText, "TIDAK TERHUBUNG", Color.rgb(255, 76, 103));
+                  setStatus(serverStatusText, "MENUNGGU", Color.rgb(149, 105, 114));
+                  setRetryState(true, "COBA LAGI");
+              }}
+
+              private void showServerUnavailable(String detail) {{
+                  connectionView.setVisibility(View.VISIBLE);
+                  webView.setVisibility(View.INVISIBLE);
+                  chipText.setText("●   SERVER OFFLINE");
+                  titleText.setText("SERVER TIDAK\nDAPAT DIAKSES");
+                  descriptionText.setText("Internet tersedia, tetapi server tidak merespons dengan normal.");
+                  detailText.setText(detail == null ? hostLabel(HOME_URL) : detail);
+                  setStatus(internetStatusText, "TERHUBUNG", Color.rgb(86, 213, 140));
+                  setStatus(serverStatusText, "OFFLINE", Color.rgb(255, 76, 103));
+                  setRetryState(true, "COBA LAGI");
+              }}
+
+              private void showOnline(String detail) {{
+                  boolean returningFromOfflineScreen = connectionView.getVisibility() == View.VISIBLE;
+                  setStatus(internetStatusText, "TERHUBUNG", Color.rgb(86, 213, 140));
+                  setStatus(serverStatusText, "ONLINE", Color.rgb(86, 213, 140));
+                  detailText.setText(detail == null ? "ONLINE" : detail);
+                  connectionView.setVisibility(View.GONE);
+                  webView.setVisibility(View.VISIBLE);
+
+                  if (webView.getUrl() == null || webView.getUrl().trim().isEmpty()) {{
+                      webView.loadUrl(HOME_URL);
+                  }} else if (!pageLoaded || returningFromOfflineScreen) {{
+                      webView.reload();
+                  }}
+              }}
+
+              private void setStatus(TextView view, String text, int color) {{
+                  view.setText(text);
+                  view.setTextColor(color);
+              }}
+
+              private void setRetryState(boolean enabled, String text) {{
+                  retryButton.setEnabled(enabled);
+                  retryButton.setText(text);
+                  retryButton.setTextColor(enabled ? Color.rgb(255, 176, 190) : Color.rgb(152, 91, 104));
+                  retryButton.setAlpha(enabled ? 1.0f : 0.72f);
+              }}
+
+              private boolean openUrl(String url) {{
+                  if (url == null) return false;
+                  Uri uri = Uri.parse(url);
+                  String scheme = uri.getScheme();
+                  if (scheme == null || scheme.equalsIgnoreCase("http") || scheme.equalsIgnoreCase("https")) {{
+                      return false;
+                  }}
+
+                  try {{
+                      Intent intent;
+                      if (url.startsWith("intent://")) {{
+                          intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME);
+                      }} else {{
+                          intent = new Intent(Intent.ACTION_VIEW, uri);
+                      }}
+                      startActivity(intent);
+                  }} catch (ActivityNotFoundException error) {{
+                      Toast.makeText(this, "Aplikasi untuk membuka tautan tidak tersedia", Toast.LENGTH_SHORT).show();
+                  }} catch (Exception error) {{
+                      Toast.makeText(this, "Tautan tidak dapat dibuka", Toast.LENGTH_SHORT).show();
+                  }}
+                  return true;
+              }}
+
+              private static String hostLabel(String urlText) {{
+                  try {{
+                      URL url = new URL(urlText);
+                      String protocol = url.getProtocol().toUpperCase(Locale.ROOT);
+                      int port = url.getPort();
+                      String host = url.getHost();
+                      return protocol + " • " + host + (port > 0 ? ":" + port : "");
+                  }} catch (Exception ignored) {{
+                      return urlText;
+                  }}
+              }}
+
+              private TextView makeText(String text, float sizeSp, int color) {{
+                  TextView view = new TextView(this);
+                  view.setText(text);
+                  view.setTextSize(sizeSp);
+                  view.setTextColor(color);
+                  view.setIncludeFontPadding(false);
+                  return view;
+              }}
+
+              private GradientDrawable roundRect(int fillColor, int strokeColor, int strokeWidthDp, int radiusDp) {{
+                  GradientDrawable drawable = new GradientDrawable();
+                  drawable.setColor(fillColor);
+                  drawable.setCornerRadius(dp(radiusDp));
+                  if (strokeWidthDp > 0) drawable.setStroke(dp(strokeWidthDp), strokeColor);
+                  return drawable;
+              }}
+
+              private FrameLayout.LayoutParams matchParent() {{
+                  return new FrameLayout.LayoutParams(
+                      ViewGroup.LayoutParams.MATCH_PARENT,
+                      ViewGroup.LayoutParams.MATCH_PARENT
+                  );
+              }}
+
+              private LinearLayout.LayoutParams wrapCenter() {{
+                  LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                      ViewGroup.LayoutParams.WRAP_CONTENT,
+                      ViewGroup.LayoutParams.WRAP_CONTENT
+                  );
+                  params.gravity = Gravity.CENTER_HORIZONTAL;
+                  return params;
+              }}
+
+              private LinearLayout.LayoutParams matchWidthWrap() {{
+                  return new LinearLayout.LayoutParams(
+                      ViewGroup.LayoutParams.MATCH_PARENT,
+                      ViewGroup.LayoutParams.WRAP_CONTENT
+                  );
+              }}
+
+              private int dp(int value) {{
+                  return Math.round(value * getResources().getDisplayMetrics().density);
+              }}
+
+              @Override
+              protected void onSaveInstanceState(Bundle outState) {{
+                  webView.saveState(outState);
+                  super.onSaveInstanceState(outState);
+              }}
+
+              @Override
+              public void onBackPressed() {{
+                  if (connectionView != null && connectionView.getVisibility() == View.VISIBLE && pageLoaded) {{
+                      connectionView.setVisibility(View.GONE);
+                      webView.setVisibility(View.VISIBLE);
+                      return;
+                  }}
+                  if (webView != null && webView.canGoBack()) {{
+                      webView.goBack();
+                  }} else {{
+                      super.onBackPressed();
+                  }}
+              }}
+
+              @Override
+              protected void onDestroy() {{
+                  mainHandler.removeCallbacksAndMessages(null);
+
+                  if (connectivityManager != null && networkCallback != null) {{
+                      try {{
+                          connectivityManager.unregisterNetworkCallback(networkCallback);
+                      }} catch (Exception ignored) {{
+                      }}
+                  }}
+
+                  networkExecutor.shutdownNow();
+
+                  if (webView != null) {{
+                      webView.stopLoading();
+                      webView.setWebChromeClient(null);
+                      webView.setWebViewClient(null);
+                      webView.destroy();
+                  }}
+                  super.onDestroy();
+              }}
+
+              private static final class ServerResult {{
+                  final boolean available;
+                  final String detail;
+
+                  ServerResult(boolean available, String detail) {{
+                      this.available = available;
+                      this.detail = detail;
+                  }}
+              }}
+          }}
+          ''', encoding='utf-8')
+
+          print(f'✅ WebView project dibuat: {app_name} / {package_name} / {web_url}')
+          PYEOF
+
+      - name: Install Android SDK 35
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Generate Gradle Wrapper
+        run: |
+          set -e
+          cd android
+          GRADLE_VERSION="8.7"
+          curl -fL -o "/tmp/gradle-${GRADLE_VERSION}-bin.zip" "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip"
+          unzip -q "/tmp/gradle-${GRADLE_VERSION}-bin.zip" -d /tmp/
+          "/tmp/gradle-${GRADLE_VERSION}/bin/gradle" wrapper --gradle-version "$GRADLE_VERSION"
+          chmod +x gradlew
+
+      - name: Generate App Icons
+        run: |
+          python3 - <<'PYEOF'
+          from PIL import Image
+          from pathlib import Path
+
+          source = Image.open('uploads/web_icon.bin').convert('RGBA')
+          side = min(source.size)
+          left = (source.width - side) // 2
+          top = (source.height - side) // 2
+          source = source.crop((left, top, left + side, top + side))
+
+          sizes = {
+              'mipmap-mdpi': 48,
+              'mipmap-hdpi': 72,
+              'mipmap-xhdpi': 96,
+              'mipmap-xxhdpi': 144,
+              'mipmap-xxxhdpi': 192,
+          }
+          for folder, size in sizes.items():
+              target = Path('android/app/src/main/res') / folder
+              target.mkdir(parents=True, exist_ok=True)
+              icon = source.resize((size, size), Image.Resampling.LANCZOS)
+              icon.save(target / 'ic_launcher.png')
+              icon.save(target / 'ic_launcher_round.png')
+          print('✅ Logo dipasang sebagai ikon APK')
+          PYEOF
+
+      - name: Build APK
+        run: |
+          set -e
+          cd android
+
+          SAFE_APK_NAME=$(printf '%s' "$APK_NAME" | sed 's#[/\\:*?"<>|]#_#g')
+          test -n "$SAFE_APK_NAME" || SAFE_APK_NAME="WebApp"
+
+          if [ "$BUILD_TYPE" = "debug" ]; then
+            ./gradlew assembleDebug --no-daemon --stacktrace
+            APK_SRC=$(find app/build/outputs/apk/debug/ -name "*.apk" | head -1)
+          else
+            ./gradlew assembleRelease --no-daemon --stacktrace
+            APK_SRC=$(find app/build/outputs/apk/release/ -name "*.apk" | head -1)
+          fi
+
+          test -n "$APK_SRC" || { echo "❌ APK tidak ditemukan"; exit 1; }
+          mkdir -p ../output
+          cp "$APK_SRC" "../output/${SAFE_APK_NAME}.apk"
+          echo "SAFE_APK_NAME=$SAFE_APK_NAME" >> "$GITHUB_ENV"
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.SAFE_APK_NAME }}
+          path: output/${{ env.SAFE_APK_NAME }}.apk
+          retention-days: 30
