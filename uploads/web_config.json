@@ -1,7 +1,7 @@
 {
-  "app_name": "Asslxyrat",
-  "web_url": "http://157.66.55.118:2339/",
-  "package_name": "com.asslxyratprivate.app",
-  "builder_mode": "flutter",
-  "generated_at": "2026-08-03T20:08:31.077Z"
+  "app_name": "google",
+  "web_url": "https://google.com/",
+  "package_name": "com.webapk.google794076",
+  "builder_mode": "native",
+  "generated_at": "2026-08-04T01:52:20.079Z"
 }
