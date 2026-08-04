@@ -1,7 +1,7 @@
 {
   "app_name": "google",
-  "web_url": "https://google.com/",
+  "web_url": "http://google.com/",
   "package_name": "com.webapk.google794076",
   "builder_mode": "native",
-  "generated_at": "2026-08-04T02:27:41.561Z"
+  "generated_at": "2026-08-04T02:38:44.511Z"
 }
