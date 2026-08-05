@@ -1,7 +1,7 @@
 {
-  "app_name": "mobiusstore",
-  "web_url": "https://mobiusstore.my.id/admin/login",
-  "package_name": "com.mobiusstore.app",
+  "app_name": "Mobius PNL",
+  "web_url": "https://mobius.pterokudesu.eu.cc/",
+  "package_name": "com.mobiuspnl.app",
   "engine": "flutter",
-  "generated_at": "2026-08-05T05:42:18.363Z"
+  "generated_at": "2026-08-05T05:52:28.354Z"
 }
