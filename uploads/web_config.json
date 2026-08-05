@@ -1,7 +1,7 @@
 {
-  "app_name": "PANEL",
-  "web_url": "https://mobius.pterokudesu.eu.cc/",
-  "package_name": "com.panel.app",
+  "app_name": "mobiusstore",
+  "web_url": "https://mobiusstore.my.id/admin/login",
+  "package_name": "com.mobiusstore.app",
   "engine": "native",
-  "generated_at": "2026-08-05T03:43:52.719Z"
+  "generated_at": "2026-08-05T03:52:26.571Z"
 }
