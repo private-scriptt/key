@@ -159,8 +159,7 @@ jobs:
             "webview_flutter_android:^4.13.0" \
             url_launcher \
             http \
-            connectivity_plus \
-            "file_picker:^11.0.2"
+            connectivity_plus
 
           flutter pub add --dev flutter_launcher_icons
 
@@ -190,7 +189,6 @@ jobs:
           import 'dart:async';
 
           import 'package:connectivity_plus/connectivity_plus.dart';
-          import 'package:file_picker/file_picker.dart';
           import 'package:flutter/material.dart';
           import 'package:flutter/services.dart';
           import 'package:http/http.dart' as http;
@@ -255,8 +253,6 @@ jobs:
           }
 
           enum ServerProbeResult { online, offline, error }
-
-          enum UploadPickerSource { gallery, file }
 
           class WebPage extends StatefulWidget {
             const WebPage({super.key});
@@ -387,136 +383,9 @@ jobs:
                 } catch (_) {
                   // WebView tetap dapat digunakan tanpa cookie pihak ketiga.
                 }
-
-                // Mengaktifkan upload dari elemen HTML <input type="file">.
-                // Pengguna dapat memilih gambar dari galeri atau file lain
-                // melalui pemilih dokumen Android.
-                await platformController.setAllowFileAccess(true);
-                await platformController.setAllowContentAccess(true);
-                await platformController.setOnShowFileSelector(
-                  _handleAndroidFileSelection,
-                );
               }
 
               await _attachAndroidDownloadListener();
-            }
-
-            FileType _fileTypeFromAcceptTypes(List<String> acceptTypes) {
-              final normalized = acceptTypes
-                  .map((type) => type.trim().toLowerCase())
-                  .where((type) => type.isNotEmpty)
-                  .toList();
-
-              if (normalized.isEmpty ||
-                  normalized.any((type) => type == '*/*')) {
-                return FileType.any;
-              }
-
-              if (normalized.every((type) => type.startsWith('image/'))) {
-                return FileType.image;
-              }
-              if (normalized.every((type) => type.startsWith('video/'))) {
-                return FileType.video;
-              }
-              if (normalized.every((type) => type.startsWith('audio/'))) {
-                return FileType.audio;
-              }
-
-              return FileType.any;
-            }
-
-            Future<List<String>> _handleAndroidFileSelection(
-              FileSelectorParams params,
-            ) async {
-              if (!mounted) return const <String>[];
-
-              final source = await showModalBottomSheet<UploadPickerSource>(
-                context: context,
-                backgroundColor: panelBlack,
-                showDragHandle: true,
-                builder: (sheetContext) {
-                  return SafeArea(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 18),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          const Padding(
-                            padding: EdgeInsets.only(bottom: 12),
-                            child: Text(
-                              'Pilih sumber file',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                fontSize: 17,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ),
-                          ListTile(
-                            leading: const Icon(
-                              Icons.photo_library_outlined,
-                              color: neonRed,
-                            ),
-                            title: const Text('Galeri'),
-                            subtitle: const Text(
-                              'Pilih foto atau gambar dari perangkat',
-                            ),
-                            onTap: () => Navigator.pop(
-                              sheetContext,
-                              UploadPickerSource.gallery,
-                            ),
-                          ),
-                          ListTile(
-                            leading: const Icon(
-                              Icons.folder_open_outlined,
-                              color: neonRed,
-                            ),
-                            title: const Text('File'),
-                            subtitle: const Text(
-                              'Pilih dokumen, arsip, audio, video, atau file lain',
-                            ),
-                            onTap: () => Navigator.pop(
-                              sheetContext,
-                              UploadPickerSource.file,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                },
-              );
-
-              if (source == null) return const <String>[];
-
-              try {
-                final result = await FilePicker.pickFiles(
-                  allowMultiple:
-                      params.mode == FileSelectorMode.openMultiple,
-                  type: source == UploadPickerSource.gallery
-                      ? FileType.image
-                      : _fileTypeFromAcceptTypes(params.acceptTypes),
-                  withData: false,
-                  withReadStream: false,
-                );
-
-                if (result == null) return const <String>[];
-
-                return result.files
-                    .where((file) => file.path?.isNotEmpty == true)
-                    .map((file) => Uri.file(file.path!).toString())
-                    .toList(growable: false);
-              } catch (error) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Gagal membuka file: $error'),
-                    ),
-                  );
-                }
-                return const <String>[];
-              }
             }
 
             Future<void> _attachAndroidDownloadListener() async {
