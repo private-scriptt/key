@@ -1,9 +1,9 @@
 {
   "app_name": "Mobius PNL",
   "web_url": "https://mobius.pterokudesu.eu.cc/",
-  "package_name": "com.mobiuspnl.aplikasi",
+  "package_name": "com.mobiuspnl.app",
   "engine": "flutter",
-  "version_name": "3.0.1",
+  "version_name": "22.0.1",
   "version_code": 7082026,
-  "generated_at": "2026-08-06T19:11:06.906Z"
+  "generated_at": "2026-08-06T19:35:08.689Z"
 }
