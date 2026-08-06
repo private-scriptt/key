@@ -491,7 +491,7 @@ jobs:
               if (source == null) return const <String>[];
 
               try {
-                final result = await FilePicker.platform.pickFiles(
+                final result = await FilePicker.pickFiles(
                   allowMultiple:
                       params.mode == FileSelectorMode.openMultiple,
                   type: source == UploadPickerSource.gallery
