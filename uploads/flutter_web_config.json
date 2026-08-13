@@ -1,9 +1,7 @@
 {
-  "app_name": "Mobius PNL",
-  "web_url": "https://mobius.pterokudesu.eu.cc/",
-  "package_name": "com.mobiuspnl.app",
+  "app_name": "Asslxyrat",
+  "web_url": "http://mobius.pterokudesu.eu.cc:5064/",
+  "package_name": "com.asslxyrat2026.app",
   "engine": "flutter",
-  "version_name": "26.12.1",
-  "version_code": 20260807,
-  "generated_at": "2026-08-06T20:02:36.154Z"
+  "generated_at": "2026-08-13T07:25:28.341Z"
 }
