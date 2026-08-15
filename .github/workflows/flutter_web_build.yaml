@@ -1,0 +1,1667 @@
+name: Build Flutter Web to APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      apk_name:
+        description: 'Nama APK Output'
+        required: true
+        default: 'WebApp'
+      build_type:
+        description: 'Tipe Build'
+        required: true
+        default: 'release'
+        type: choice
+        options:
+          - release
+          - debug
+
+env:
+  APK_NAME: ${{ github.event.inputs.apk_name || 'WebApp' }}
+  BUILD_TYPE: ${{ github.event.inputs.build_type || 'release' }}
+
+jobs:
+  build-flutter-web-apk:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Flutter stable
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install image tools
+        run: python3 -m pip install --disable-pip-version-check Pillow
+
+      - name: Validate Web APK inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -f uploads/flutter_web_config.json || {
+            echo "× uploads/flutter_web_config.json tidak ditemukan"
+            exit 1
+          }
+
+          test -f uploads/flutter_web_icon.bin || {
+            echo "× uploads/flutter_web_icon.bin tidak ditemukan"
+            exit 1
+          }
+
+          python3 - <<'PYEOF'
+          import json
+          import os
+          import re
+          import shlex
+          from pathlib import Path
+
+          from PIL import Image, ImageOps
+
+          config = json.loads(
+              Path('uploads/flutter_web_config.json').read_text(encoding='utf-8')
+          )
+
+          app_name = str(config.get('app_name', '')).strip()[:40]
+          web_url = str(config.get('web_url', '')).strip()
+          package_name = str(config.get('package_name', '')).strip().lower()
+          version_name = str(config.get('version_name', '1.0.0')).strip()[:32] or '1.0.0'
+          try:
+              version_code = int(config.get('version_code', 1))
+          except (TypeError, ValueError):
+              raise SystemExit('Version code tidak valid')
+
+          if not app_name:
+              raise SystemExit('Nama aplikasi kosong')
+
+          if not re.fullmatch(
+              r'[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*){1,5}',
+              package_name,
+          ):
+              raise SystemExit('Package name tidak valid')
+
+          if not re.fullmatch(r'https?://[^\s]+', web_url, re.IGNORECASE):
+              raise SystemExit('URL website tidak valid')
+
+          if not re.fullmatch(r'[0-9A-Za-z][0-9A-Za-z._+-]{0,31}', version_name):
+              raise SystemExit('Version name tidak valid')
+          if version_code < 1 or version_code > 2100000000:
+              raise SystemExit('Version code di luar batas Android')
+
+          raw_apk_name = str(os.environ.get('APK_NAME', 'WebApp'))
+          safe_apk_name = re.sub(
+              r'[<>:"/\\|?*\x00-\x1F]+',
+              '-',
+              raw_apk_name,
+          )
+          safe_apk_name = re.sub(r'\s+', ' ', safe_apk_name).strip()
+          safe_apk_name = safe_apk_name[:48] or 'WebApp'
+          safe_apk_name = f'{safe_apk_name}-v{version_name}'[:60]
+
+          Path('build_meta.env').write_text(
+              '\n'.join(
+                  [
+                      f'APP_NAME={shlex.quote(app_name)}',
+                      f'WEB_URL={shlex.quote(web_url)}',
+                      f'PACKAGE_NAME={shlex.quote(package_name)}',
+                      f'VERSION_NAME={shlex.quote(version_name)}',
+                      f'VERSION_CODE={version_code}',
+                      f'SAFE_APK_NAME={shlex.quote(safe_apk_name)}',
+                  ]
+              )
+              + '\n',
+              encoding='utf-8',
+          )
+
+          source = Image.open('uploads/flutter_web_icon.bin')
+          source = ImageOps.exif_transpose(source).convert('RGBA')
+
+          side = min(source.size)
+          left = (source.width - side) // 2
+          top = (source.height - side) // 2
+          source = source.crop((left, top, left + side, top + side))
+          source = source.resize((1024, 1024), Image.Resampling.LANCZOS)
+
+          prepared = Path('prepared')
+          prepared.mkdir(exist_ok=True)
+          source.save(prepared / 'icon.png', format='PNG', optimize=True)
+
+          print(
+              f'✓ Konfigurasi valid: {app_name} / '
+              f'{package_name} / {web_url} / v{version_name} ({version_code})'
+          )
+          PYEOF
+
+      - name: Create Flutter project
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rm -rf flutter_app
+
+          flutter create \
+            --platforms=android \
+            --org com.telegrambuilder \
+            --project-name web_wrapper \
+            flutter_app
+
+          cd flutter_app
+
+          # webview_flutter terbaru mendukung Android SDK 24+.
+          # webview_flutter_android ditambahkan langsung karena API
+          # AndroidWebViewController.webViewIdentifier dipakai.
+          flutter pub add \
+            "webview_flutter:^4.14.1" \
+            "webview_flutter_android:^4.13.0" \
+            url_launcher \
+            http \
+            connectivity_plus
+
+          flutter pub add --dev flutter_launcher_icons
+
+      - name: Generate Flutter WebView Project
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          set -a
+          source build_meta.env
+          set +a
+
+          python3 - <<'PYEOF'
+          import json
+          import os
+          import re
+          import textwrap
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          root = Path('flutter_app')
+          app_name = os.environ['APP_NAME']
+          web_url = os.environ['WEB_URL']
+          package_name = os.environ['PACKAGE_NAME']
+          version_name = os.environ.get('VERSION_NAME', '1.0.0')
+          version_code = int(os.environ.get('VERSION_CODE', '1'))
+
+          main_template = r'''
+          import 'dart:async';
+
+          import 'package:connectivity_plus/connectivity_plus.dart';
+          import 'package:flutter/material.dart';
+          import 'package:flutter/services.dart';
+          import 'package:http/http.dart' as http;
+          import 'package:url_launcher/url_launcher.dart';
+          import 'package:webview_flutter/webview_flutter.dart';
+          import 'package:webview_flutter_android/webview_flutter_android.dart';
+
+          const String appName = __APP_NAME__;
+          const String homeUrl = __HOME_URL__;
+
+          const Color pageBlack = Color(0xFF050001);
+          const Color panelBlack = Color(0xFF100305);
+          const Color neonRed = Color(0xFFFF4058);
+          const Color dimRed = Color(0xFF76222E);
+          const Color softText = Color(0xFFB99AA0);
+
+          const SystemUiOverlayStyle systemBarStyle = SystemUiOverlayStyle(
+            statusBarColor: Colors.transparent,
+            statusBarIconBrightness: Brightness.light,
+            statusBarBrightness: Brightness.dark,
+            systemStatusBarContrastEnforced: false,
+            systemNavigationBarColor: Colors.transparent,
+            systemNavigationBarDividerColor: Colors.transparent,
+            systemNavigationBarIconBrightness: Brightness.light,
+            systemNavigationBarContrastEnforced: false,
+          );
+
+          Future<void> main() async {
+            WidgetsFlutterBinding.ensureInitialized();
+            await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+            SystemChrome.setSystemUIOverlayStyle(systemBarStyle);
+            runApp(const WebWrapperApp());
+          }
+
+          class WebWrapperApp extends StatelessWidget {
+            const WebWrapperApp({super.key});
+
+            @override
+            Widget build(BuildContext context) {
+              return MaterialApp(
+                title: appName,
+                debugShowCheckedModeBanner: false,
+                theme: ThemeData(
+                  brightness: Brightness.dark,
+                  scaffoldBackgroundColor: pageBlack,
+                  colorScheme: ColorScheme.fromSeed(
+                    seedColor: neonRed,
+                    brightness: Brightness.dark,
+                  ),
+                  useMaterial3: true,
+                ),
+                home: const WebPage(),
+              );
+            }
+          }
+
+          enum ConnectionViewState {
+            checking,
+            noInternet,
+            serverOffline,
+            serverError,
+          }
+
+          enum ServerProbeResult { online, offline, error }
+
+          class WebPage extends StatefulWidget {
+            const WebPage({super.key});
+
+            @override
+            State<WebPage> createState() => _WebPageState();
+          }
+
+          class _WebPageState extends State<WebPage> {
+            static const MethodChannel _downloadChannel =
+                MethodChannel('web_wrapper/downloads');
+
+            final Connectivity _connectivity = Connectivity();
+            final http.Client _httpClient = http.Client();
+
+            late final WebViewController _controller;
+            late final WebViewCookieManager _cookieManager;
+            StreamSubscription<List<ConnectivityResult>>?
+                _connectivitySubscription;
+            Timer? _autoRetryTimer;
+
+            ConnectionViewState _connectionState =
+                ConnectionViewState.checking;
+            int _progress = 0;
+            int _checkToken = 0;
+            bool _checking = false;
+            bool _showWebView = true;
+            bool _downloadListenerAttached = false;
+
+            @override
+            void initState() {
+              super.initState();
+
+              _cookieManager = WebViewCookieManager();
+
+              _controller = WebViewController()
+                ..setJavaScriptMode(JavaScriptMode.unrestricted)
+                ..setBackgroundColor(pageBlack)
+                ..setNavigationDelegate(
+                  NavigationDelegate(
+                    onProgress: (value) {
+                      if (mounted) setState(() => _progress = value);
+                    },
+                    onPageStarted: (_) {
+                      if (!mounted) return;
+                      setState(() {
+                        _showWebView = true;
+                        _progress = 0;
+                      });
+                    },
+                    onPageFinished: (_) async {
+                      if (mounted) setState(() => _progress = 100);
+
+                      // Membuat link target="_blank" (termasuk sebagian
+                      // tombol MediaFire) tetap dibuka di WebView yang sama.
+                      try {
+                        await _controller.runJavaScript(r"""
+                          (() => {
+                            const forceSameWindow = () => {
+                              document.querySelectorAll('a[target]').forEach((a) => {
+                                a.setAttribute('target', '_self');
+                              });
+                            };
+                            forceSameWindow();
+                            new MutationObserver(forceSameWindow).observe(
+                              document.documentElement,
+                              { childList: true, subtree: true }
+                            );
+                            window.open = (url) => {
+                              if (url) window.location.href = url;
+                              return window;
+                            };
+                          })();
+                        """);
+                      } catch (_) {
+                        // Situs dapat menolak injeksi JavaScript tertentu.
+                      }
+
+                      if (!_downloadListenerAttached) {
+                        unawaited(_attachAndroidDownloadListener());
+                      }
+                    },
+                    onWebResourceError: (error) {
+                      if (error.isForMainFrame == true && mounted) {
+                        setState(() {
+                          _showWebView = false;
+                          _connectionState = ConnectionViewState.checking;
+                          _progress = 0;
+                        });
+                        unawaited(_checkConnection());
+                      }
+                    },
+                    onNavigationRequest: _handleNavigation,
+                  ),
+                );
+
+              _connectivitySubscription =
+                  _connectivity.onConnectivityChanged.listen((_) {
+                if (!_showWebView) {
+                  unawaited(_checkConnection());
+                }
+              });
+
+              unawaited(_configureAndroidWebView());
+              unawaited(_controller.loadRequest(Uri.parse(homeUrl)));
+            }
+
+            @override
+            void dispose() {
+              _checkToken++;
+              _autoRetryTimer?.cancel();
+              _connectivitySubscription?.cancel();
+              _httpClient.close();
+              super.dispose();
+            }
+
+            Future<void> _configureAndroidWebView() async {
+              final platformController = _controller.platform;
+              final cookiePlatform = _cookieManager.platform;
+
+              if (platformController is AndroidWebViewController &&
+                  cookiePlatform is AndroidWebViewCookieManager) {
+                try {
+                  await cookiePlatform.setAcceptThirdPartyCookies(
+                    platformController,
+                    true,
+                  );
+                } catch (_) {
+                  // WebView tetap dapat digunakan tanpa cookie pihak ketiga.
+                }
+
+                try {
+                  await platformController.setAllowContentAccess(true);
+                  await platformController.setAllowFileAccess(false);
+                  await platformController.setOnShowFileSelector(
+                    (FileSelectorParams params) async {
+                      try {
+                        final selected = await _downloadChannel
+                            .invokeMethod<List<dynamic>>(
+                          'pickFiles',
+                          <String, Object>{
+                            'acceptTypes': params.acceptTypes,
+                            'allowMultiple':
+                                params.mode == FileSelectorMode.openMultiple,
+                            'capture': params.isCaptureEnabled,
+                          },
+                        );
+
+                        return (selected ?? const <dynamic>[])
+                            .map((item) => item.toString())
+                            .where((item) => item.isNotEmpty)
+                            .toList(growable: false);
+                      } on PlatformException {
+                        return const <String>[];
+                      } on MissingPluginException {
+                        return const <String>[];
+                      }
+                    },
+                  );
+                } catch (_) {
+                  // File picker tetap tidak mengganggu WebView bila tidak tersedia.
+                }
+              }
+
+              await _attachAndroidDownloadListener();
+            }
+
+            Future<void> _attachAndroidDownloadListener() async {
+              if (_downloadListenerAttached) return;
+
+              final platformController = _controller.platform;
+              if (platformController is! AndroidWebViewController) return;
+
+              // Native WebView kadang belum tersedia tepat setelah controller
+              // dibuat. Coba beberapa kali sebelum dianggap gagal.
+              for (var attempt = 0; attempt < 12; attempt++) {
+                try {
+                  final attached = await _downloadChannel.invokeMethod<bool>(
+                    'attachDownloadListener',
+                    <String, Object>{
+                      'webViewIdentifier':
+                          platformController.webViewIdentifier,
+                    },
+                  );
+
+                  if (attached == true) {
+                    _downloadListenerAttached = true;
+                    return;
+                  }
+                } on PlatformException {
+                  // Tunggu native WebView selesai dibuat, lalu ulangi.
+                } on MissingPluginException {
+                  return;
+                }
+
+                await Future<void>.delayed(
+                  const Duration(milliseconds: 350),
+                );
+              }
+            }
+
+            Future<bool> _hasInternetAccess() async {
+              try {
+                final results = await _connectivity.checkConnectivity();
+                if (results.isEmpty ||
+                    results.every((item) => item == ConnectivityResult.none)) {
+                  return false;
+                }
+              } catch (_) {
+                // Tetap lanjut ke pengujian HTTP.
+              }
+
+              final probes = <Uri>[
+                Uri.parse(
+                  'https://connectivitycheck.gstatic.com/generate_204',
+                ),
+                Uri.parse('https://www.cloudflare.com/cdn-cgi/trace'),
+              ];
+
+              for (final uri in probes) {
+                try {
+                  final response = await _httpClient
+                      .head(
+                        uri,
+                        headers: const {
+                          'Cache-Control': 'no-cache',
+                          'User-Agent': 'Mozilla/5.0 (Linux; Android 15; Mobile) AppleWebKit/537.36 Chrome/131.0 Mobile Safari/537.36',
+                        },
+                      )
+                      .timeout(const Duration(seconds: 5));
+
+                  if (response.statusCode >= 200 &&
+                      response.statusCode < 500) {
+                    return true;
+                  }
+                } catch (_) {
+                  // Coba endpoint berikutnya.
+                }
+              }
+              return false;
+            }
+
+            Future<ServerProbeResult> _probeServer() async {
+              final uri = Uri.parse(homeUrl);
+              final headers = <String, String>{
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache',
+                'User-Agent': 'Mozilla/5.0 (Linux; Android 15; Mobile) AppleWebKit/537.36 Chrome/131.0 Mobile Safari/537.36',
+              };
+
+              try {
+                final response = await _httpClient
+                    .head(uri, headers: headers)
+                    .timeout(const Duration(seconds: 10));
+
+                if (response.statusCode >= 500) {
+                  return ServerProbeResult.error;
+                }
+                return ServerProbeResult.online;
+              } catch (_) {
+                // Sebagian server tidak mendukung HEAD.
+              }
+
+              try {
+                final request = http.Request('GET', uri)
+                  ..followRedirects = true
+                  ..maxRedirects = 5
+                  ..headers.addAll(headers)
+                  ..headers['Range'] = 'bytes=0-0';
+
+                final response = await _httpClient
+                    .send(request)
+                    .timeout(const Duration(seconds: 12));
+                final statusCode = response.statusCode;
+                final subscription = response.stream.listen((_) {});
+                await subscription.cancel();
+
+                if (statusCode >= 500) {
+                  return ServerProbeResult.error;
+                }
+                return ServerProbeResult.online;
+              } catch (_) {
+                return ServerProbeResult.offline;
+              }
+            }
+
+            Future<void> _checkConnection() async {
+              if (_checking) return;
+
+              final token = ++_checkToken;
+              _checking = true;
+              _autoRetryTimer?.cancel();
+
+              if (mounted) {
+                setState(() {
+                  _showWebView = false;
+                  _connectionState = ConnectionViewState.checking;
+                  _progress = 0;
+                });
+              }
+
+              final hasInternet = await _hasInternetAccess();
+              if (!mounted || token != _checkToken) return;
+
+              if (!hasInternet) {
+                _finishCheck(token, ConnectionViewState.noInternet);
+                return;
+              }
+
+              final serverResult = await _probeServer();
+              if (!mounted || token != _checkToken) return;
+
+              switch (serverResult) {
+                case ServerProbeResult.online:
+                  setState(() {
+                    _checking = false;
+                    _showWebView = true;
+                    _progress = 0;
+                  });
+                  await _controller.loadRequest(Uri.parse(homeUrl));
+                  break;
+                case ServerProbeResult.error:
+                  _finishCheck(token, ConnectionViewState.serverError);
+                  break;
+                case ServerProbeResult.offline:
+                  _finishCheck(token, ConnectionViewState.serverOffline);
+                  break;
+              }
+            }
+
+            void _finishCheck(int token, ConnectionViewState state) {
+              if (!mounted || token != _checkToken) return;
+
+              setState(() {
+                _connectionState = state;
+                _checking = false;
+                _showWebView = false;
+              });
+
+              _autoRetryTimer?.cancel();
+              _autoRetryTimer = Timer(const Duration(seconds: 15), () {
+                if (mounted && !_showWebView) {
+                  unawaited(_checkConnection());
+                }
+              });
+            }
+
+            Future<NavigationDecision> _handleNavigation(
+              NavigationRequest request,
+            ) async {
+              final uri = Uri.tryParse(request.url);
+              if (uri == null) return NavigationDecision.prevent;
+
+              final scheme = uri.scheme.toLowerCase();
+              if (scheme == 'http' || scheme == 'https') {
+                return NavigationDecision.navigate;
+              }
+
+              try {
+                final opened = await launchUrl(
+                  uri,
+                  mode: LaunchMode.externalApplication,
+                );
+                if (!opened && mounted) {
+                  _showMessage('Tautan tidak dapat dibuka');
+                }
+              } catch (_) {
+                if (mounted) {
+                  _showMessage(
+                    'Aplikasi untuk membuka tautan tidak tersedia',
+                  );
+                }
+              }
+              return NavigationDecision.prevent;
+            }
+
+            void _showMessage(String message) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text(message)),
+              );
+            }
+
+            Future<void> _handleBack() async {
+              if (_showWebView && await _controller.canGoBack()) {
+                await _controller.goBack();
+                return;
+              }
+              await SystemNavigator.pop();
+            }
+
+            @override
+            Widget build(BuildContext context) {
+              return AnnotatedRegion<SystemUiOverlayStyle>(
+                value: systemBarStyle,
+                child: PopScope(
+                  canPop: false,
+                  onPopInvokedWithResult: (didPop, result) async {
+                    if (!didPop) await _handleBack();
+                  },
+                  child: Scaffold(
+                    backgroundColor: pageBlack,
+                    body: SafeArea(
+                      top: true,
+                      bottom: true,
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          if (_showWebView)
+                            WebViewWidget(controller: _controller)
+                          else
+                            _ConnectionStatusPage(
+                              state: _connectionState,
+                              checking: _checking,
+                              onRetry: _checking
+                                  ? null
+                                  : () => unawaited(_checkConnection()),
+                            ),
+                          if (_showWebView && _progress < 100)
+                            Align(
+                              alignment: Alignment.topCenter,
+                              child: LinearProgressIndicator(
+                                value: _progress / 100,
+                                minHeight: 3,
+                                color: neonRed,
+                                backgroundColor: dimRed,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            }
+          }
+
+          class _ConnectionStatusPage extends StatelessWidget {
+            const _ConnectionStatusPage({
+              required this.state,
+              required this.checking,
+              required this.onRetry,
+            });
+
+            final ConnectionViewState state;
+            final bool checking;
+            final VoidCallback? onRetry;
+
+            String get _title {
+              switch (state) {
+                case ConnectionViewState.checking:
+                  return 'MEMERIKSA KONEKSI';
+                case ConnectionViewState.noInternet:
+                  return 'TIDAK ADA INTERNET';
+                case ConnectionViewState.serverOffline:
+                  return 'SERVER TIDAK DAPAT DIJANGKAU';
+                case ConnectionViewState.serverError:
+                  return 'SERVER SEDANG BERMASALAH';
+              }
+            }
+
+            String get _message {
+              switch (state) {
+                case ConnectionViewState.checking:
+                  return 'Aplikasi sedang memeriksa internet dan server.';
+                case ConnectionViewState.noInternet:
+                  return 'Aktifkan Wi-Fi atau data seluler, lalu coba lagi.';
+                case ConnectionViewState.serverOffline:
+                  return 'Internet tersedia, tetapi server tidak memberikan respons.';
+                case ConnectionViewState.serverError:
+                  return 'Server dapat dijangkau, tetapi sedang mengalami gangguan.';
+              }
+            }
+
+            @override
+            Widget build(BuildContext context) {
+              final host = Uri.tryParse(homeUrl)?.host ?? homeUrl;
+
+              return ColoredBox(
+                color: pageBlack,
+                child: Center(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(28),
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 480),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Container(
+                            width: 96,
+                            height: 96,
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: panelBlack,
+                              borderRadius: BorderRadius.circular(24),
+                              border: Border.all(color: neonRed),
+                              boxShadow: const [
+                                BoxShadow(
+                                  color: Color(0x55FF4058),
+                                  blurRadius: 28,
+                                ),
+                              ],
+                            ),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(17),
+                              child: Image.asset(
+                                'assets/icon.png',
+                                fit: BoxFit.cover,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 30),
+                          Text(
+                            _title,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: neonRed,
+                              fontSize: 27,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 1.2,
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                          Text(
+                            host,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: Color(0xFFA97880),
+                              fontSize: 12,
+                              letterSpacing: 1.2,
+                            ),
+                          ),
+                          const SizedBox(height: 18),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(22),
+                            decoration: BoxDecoration(
+                              color: panelBlack,
+                              borderRadius: BorderRadius.circular(18),
+                              border: Border.all(
+                                color: const Color(0xFF3C151B),
+                              ),
+                            ),
+                            child: Text(
+                              _message,
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                color: softText,
+                                fontSize: 14,
+                                height: 1.55,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 20),
+                          SizedBox(
+                            width: double.infinity,
+                            height: 56,
+                            child: FilledButton(
+                              onPressed: onRetry,
+                              style: FilledButton.styleFrom(
+                                backgroundColor: const Color(0xFF21070B),
+                                foregroundColor: neonRed,
+                                side: const BorderSide(color: dimRed),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(17),
+                                ),
+                              ),
+                              child: Text(
+                                checking
+                                    ? 'SEDANG MEMERIKSA'
+                                    : 'COBA SAMBUNGKAN LAGI',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: 2,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          const Text(
+                            'PEMERIKSAAN OTOMATIS SETIAP 15 DETIK',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: Color(0xFF765059),
+                              fontSize: 9,
+                              letterSpacing: 1.8,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            }
+          }
+          '''
+
+          main_dart = textwrap.dedent(main_template).lstrip()
+          main_dart = main_dart.replace(
+              '__APP_NAME__',
+              json.dumps(app_name, ensure_ascii=False),
+          )
+          main_dart = main_dart.replace(
+              '__HOME_URL__',
+              json.dumps(web_url, ensure_ascii=False),
+          )
+          (root / 'lib/main.dart').write_text(main_dart, encoding='utf-8')
+
+          assets = root / 'assets'
+          assets.mkdir(exist_ok=True)
+          (assets / 'icon.png').write_bytes(
+              Path('prepared/icon.png').read_bytes()
+          )
+
+          pubspec_path = root / 'pubspec.yaml'
+          pubspec = pubspec_path.read_text(encoding='utf-8')
+          if '    - assets/icon.png' not in pubspec:
+              pubspec = re.sub(
+                  r'(?m)^flutter:\s*$',
+                  'flutter:\n  assets:\n    - assets/icon.png',
+                  pubspec,
+                  count=1,
+              )
+          pubspec_path.write_text(pubspec, encoding='utf-8')
+
+          (root / 'flutter_launcher_icons.yaml').write_text(
+              textwrap.dedent(
+                  '''
+                  flutter_launcher_icons:
+                    android: true
+                    ios: false
+                    image_path: assets/icon.png
+                    adaptive_icon_background: "#000000"
+                    adaptive_icon_foreground: assets/icon.png
+                    min_sdk_android: 24
+                  '''
+              ).lstrip(),
+              encoding='utf-8',
+          )
+
+          gradle_candidates = [
+              root / 'android/app/build.gradle.kts',
+              root / 'android/app/build.gradle',
+          ]
+          gradle_path = next(
+              (path for path in gradle_candidates if path.exists()),
+              None,
+          )
+          if gradle_path is None:
+              raise SystemExit('File Gradle aplikasi Flutter tidak ditemukan')
+
+          gradle = gradle_path.read_text(encoding='utf-8')
+
+          if gradle_path.suffix == '.kts':
+              gradle = re.sub(
+                  r'namespace\s*=\s*"[^"]+"',
+                  f'namespace = "{package_name}"',
+                  gradle,
+                  count=1,
+              )
+              gradle = re.sub(
+                  r'applicationId\s*=\s*"[^"]+"',
+                  f'applicationId = "{package_name}"',
+                  gradle,
+                  count=1,
+              )
+              gradle = re.sub(
+                  r'compileSdk\s*=\s*[^\n]+',
+                  'compileSdk = 36',
+                  gradle,
+                  count=1,
+              )
+              gradle = re.sub(
+                  r'minSdk\s*=\s*[^\n]+',
+                  'minSdk = 24',
+                  gradle,
+                  count=1,
+              )
+              gradle = re.sub(
+                  r'targetSdk\s*=\s*[^\n]+',
+                  'targetSdk = 36',
+                  gradle,
+                  count=1,
+              )
+              gradle = re.sub(
+                  r'versionCode\s*=\s*[^\n]+',
+                  f'versionCode = {version_code}',
+                  gradle,
+                  count=1,
+              )
+              gradle = re.sub(
+                  r'versionName\s*=\s*[^\n]+',
+                  f'versionName = "{version_name}"',
+                  gradle,
+                  count=1,
+              )
+          else:
+              gradle = re.sub(
+                  r'namespace\s+(?:=\s*)?["\'][^"\']+["\']',
+                  f'namespace "{package_name}"',
+                  gradle,
+                  count=1,
+              )
+              gradle = re.sub(
+                  r'applicationId\s+(?:=\s*)?["\'][^"\']+["\']',
+                  f'applicationId "{package_name}"',
+                  gradle,
+                  count=1,
+              )
+              gradle = re.sub(
+                  r'compileSdk(?:Version)?\s+(?:=\s*)?[^\n]+',
+                  'compileSdkVersion 36',
+                  gradle,
+                  count=1,
+              )
+              gradle = re.sub(
+                  r'minSdk(?:Version)?\s+(?:=\s*)?[^\n]+',
+                  'minSdkVersion 24',
+                  gradle,
+                  count=1,
+              )
+              gradle = re.sub(
+                  r'targetSdk(?:Version)?\s+(?:=\s*)?[^\n]+',
+                  'targetSdkVersion 36',
+                  gradle,
+                  count=1,
+              )
+              gradle = re.sub(
+                  r'versionCode\s+(?:=\s*)?[^\n]+',
+                  f'versionCode {version_code}',
+                  gradle,
+                  count=1,
+              )
+              gradle = re.sub(
+                  r'versionName\s+(?:=\s*)?[^\n]+',
+                  f'versionName "{version_name}"',
+                  gradle,
+                  count=1,
+              )
+
+          gradle_path.write_text(gradle, encoding='utf-8')
+
+          for source_root in [
+              root / 'android/app/src/main/kotlin',
+              root / 'android/app/src/main/java',
+          ]:
+              if source_root.exists():
+                  for old_activity in source_root.rglob('MainActivity.*'):
+                      old_activity.unlink()
+
+          activity_dir = (
+              root
+              / 'android/app/src/main/kotlin'
+              / Path(package_name.replace('.', '/'))
+          )
+          activity_dir.mkdir(parents=True, exist_ok=True)
+
+          activity_source = f'''
+          package {package_name}
+
+          import android.Manifest
+          import android.app.Activity
+          import android.app.DownloadManager
+          import android.content.ActivityNotFoundException
+          import android.content.Context
+          import android.content.Intent
+          import android.content.pm.PackageManager
+          import android.graphics.Color
+          import android.net.Uri
+          import android.os.Build
+          import android.os.Bundle
+          import android.os.Environment
+          import android.webkit.CookieManager
+          import android.webkit.URLUtil
+          import android.webkit.WebView
+          import android.widget.Toast
+          import androidx.core.app.ActivityCompat
+          import androidx.core.content.ContextCompat
+          import androidx.core.view.WindowCompat
+          import androidx.core.view.WindowInsetsControllerCompat
+          import io.flutter.embedding.android.FlutterActivity
+          import io.flutter.embedding.engine.FlutterEngine
+          import io.flutter.plugin.common.MethodChannel
+          import io.flutter.plugins.webviewflutter.WebViewFlutterAndroidExternalApi
+
+          @Suppress("DEPRECATION")
+          class MainActivity : FlutterActivity() {{
+              companion object {{
+                  private const val DOWNLOAD_CHANNEL =
+                      "web_wrapper/downloads"
+                  private const val STORAGE_PERMISSION_REQUEST = 4401
+                  private const val FILE_PICKER_REQUEST = 4402
+                  private const val APP_LABEL = __KOTLIN_APP_LABEL__
+              }}
+
+              private data class PendingDownload(
+                  val url: String,
+                  val userAgent: String,
+                  val contentDisposition: String,
+                  val mimeType: String,
+              )
+
+              private var pendingDownload: PendingDownload? = null
+              private var pendingFilePickerResult: MethodChannel.Result? = null
+
+              override fun onCreate(savedInstanceState: Bundle?) {{
+                  super.onCreate(savedInstanceState)
+
+                  window.decorView.setBackgroundColor(Color.BLACK)
+                  WindowCompat.setDecorFitsSystemWindows(window, false)
+
+                  WindowInsetsControllerCompat(
+                      window,
+                      window.decorView,
+                  ).apply {{
+                      isAppearanceLightStatusBars = false
+                      isAppearanceLightNavigationBars = false
+                  }}
+
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {{
+                      window.isStatusBarContrastEnforced = false
+                      window.isNavigationBarContrastEnforced = false
+                  }}
+
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {{
+                      window.navigationBarDividerColor = Color.TRANSPARENT
+                  }}
+              }}
+
+              override fun configureFlutterEngine(
+                  flutterEngine: FlutterEngine,
+              ) {{
+                  super.configureFlutterEngine(flutterEngine)
+
+                  MethodChannel(
+                      flutterEngine.dartExecutor.binaryMessenger,
+                      DOWNLOAD_CHANNEL,
+                  ).setMethodCallHandler {{ call, result ->
+                      when (call.method) {{
+                          "attachDownloadListener" -> {{
+                              val identifier = call.argument<Number>(
+                                  "webViewIdentifier"
+                              )?.toLong()
+
+                              if (identifier == null) {{
+                                  result.error(
+                                      "INVALID_IDENTIFIER",
+                                      "WebView identifier tidak ditemukan",
+                                      null,
+                                  )
+                                  return@setMethodCallHandler
+                              }}
+
+                              val webView =
+                                  WebViewFlutterAndroidExternalApi.getWebView(
+                                      flutterEngine,
+                                      identifier,
+                                  )
+
+                              if (webView == null) {{
+                                  result.error(
+                                      "WEBVIEW_NOT_READY",
+                                      "Native WebView belum tersedia",
+                                      null,
+                                  )
+                                  return@setMethodCallHandler
+                              }}
+
+                              attachDownloadListener(webView)
+                              result.success(true)
+                          }}
+
+                          "pickFiles" -> {{
+                              if (pendingFilePickerResult != null) {{
+                                  result.error(
+                                      "FILE_PICKER_BUSY",
+                                      "File picker sedang digunakan",
+                                      null,
+                                  )
+                                  return@setMethodCallHandler
+                              }}
+
+                              val acceptTypes = call.argument<List<String>>(
+                                  "acceptTypes"
+                              ).orEmpty()
+                                  .map {{ it.trim() }}
+                                  .filter {{ it.contains("/") }}
+                                  .distinct()
+
+                              val allowMultiple = call.argument<Boolean>(
+                                  "allowMultiple"
+                              ) ?: false
+
+                              val intent = Intent(
+                                  Intent.ACTION_OPEN_DOCUMENT
+                              ).apply {{
+                                  addCategory(Intent.CATEGORY_OPENABLE)
+                                  type = if (acceptTypes.size == 1) {{
+                                      acceptTypes.first()
+                                  }} else {{
+                                      "*/*"
+                                  }}
+                                  putExtra(
+                                      Intent.EXTRA_ALLOW_MULTIPLE,
+                                      allowMultiple,
+                                  )
+                                  if (acceptTypes.size > 1) {{
+                                      putExtra(
+                                          Intent.EXTRA_MIME_TYPES,
+                                          acceptTypes.toTypedArray(),
+                                      )
+                                  }}
+                              }}
+
+                              pendingFilePickerResult = result
+                              try {{
+                                  startActivityForResult(
+                                      Intent.createChooser(
+                                          intent,
+                                          "Pilih file untuk diupload",
+                                      ),
+                                      FILE_PICKER_REQUEST,
+                                  )
+                              }} catch (error: ActivityNotFoundException) {{
+                                  pendingFilePickerResult = null
+                                  result.error(
+                                      "FILE_PICKER_UNAVAILABLE",
+                                      "Aplikasi pemilih file tidak tersedia",
+                                      null,
+                                  )
+                              }} catch (error: Exception) {{
+                                  pendingFilePickerResult = null
+                                  result.error(
+                                      "FILE_PICKER_ERROR",
+                                      error.message ?: "File picker gagal",
+                                      null,
+                                  )
+                              }}
+                          }}
+
+                          else -> result.notImplemented()
+                      }}
+                  }}
+              }}
+
+              private fun attachDownloadListener(webView: WebView) {{
+                  webView.setDownloadListener {{
+                          url,
+                          userAgent,
+                          contentDisposition,
+                          mimeType,
+                          _ ->
+
+                      if (url.isNullOrBlank()) {{
+                          Toast.makeText(
+                              this,
+                              "Alamat download tidak valid",
+                              Toast.LENGTH_SHORT,
+                          ).show()
+                          return@setDownloadListener
+                      }}
+
+                      val download = PendingDownload(
+                          url = url,
+                          userAgent = userAgent.orEmpty(),
+                          contentDisposition = contentDisposition.orEmpty(),
+                          mimeType = mimeType.orEmpty(),
+                      )
+
+                      val needsStoragePermission =
+                          Build.VERSION.SDK_INT <= Build.VERSION_CODES.P &&
+                          ContextCompat.checkSelfPermission(
+                              this,
+                              Manifest.permission.WRITE_EXTERNAL_STORAGE,
+                          ) != PackageManager.PERMISSION_GRANTED
+
+                      if (needsStoragePermission) {{
+                          pendingDownload = download
+                          ActivityCompat.requestPermissions(
+                              this,
+                              arrayOf(
+                                  Manifest.permission.WRITE_EXTERNAL_STORAGE
+                              ),
+                              STORAGE_PERMISSION_REQUEST,
+                          )
+                          return@setDownloadListener
+                      }}
+
+                      enqueueDownload(download)
+                  }}
+              }}
+
+              private fun enqueueDownload(download: PendingDownload) {{
+                  try {{
+                      val uri = Uri.parse(download.url)
+                      val scheme = uri.scheme?.lowercase()
+
+                      if (scheme != "http" && scheme != "https") {{
+                          Toast.makeText(
+                              this,
+                              "Jenis link download tidak didukung",
+                              Toast.LENGTH_SHORT,
+                          ).show()
+                          return
+                      }}
+
+                      val guessedName = URLUtil.guessFileName(
+                          download.url,
+                          download.contentDisposition,
+                          download.mimeType,
+                      )
+
+                      val safeName = guessedName
+                          .map {{ character ->
+                              if (
+                                  character.code < 32 ||
+                                  character in """\\/:*?"<>|"""
+                              ) '_' else character
+                          }}
+                          .joinToString("")
+                          .take(100)
+                          .ifBlank {{ "download.bin" }}
+
+                      // ID acak mencegah bentrok ketika nama file yang sama
+                      // sudah terdapat di folder Download.
+                      val fileName =
+                          java.util.UUID.randomUUID()
+                              .toString()
+                              .take(8) + "_" + safeName
+
+                      val request = DownloadManager.Request(uri)
+                          .setTitle(safeName)
+                          .setDescription("Mengunduh file dari $APP_LABEL")
+                          .setNotificationVisibility(
+                              DownloadManager.Request
+                                  .VISIBILITY_VISIBLE_NOTIFY_COMPLETED
+                          )
+                          .setAllowedOverMetered(true)
+                          .setAllowedOverRoaming(true)
+                          .setDestinationInExternalPublicDir(
+                              Environment.DIRECTORY_DOWNLOADS,
+                              fileName,
+                          )
+
+                      if (download.mimeType.isNotBlank()) {{
+                          request.setMimeType(download.mimeType)
+                      }}
+
+                      if (download.userAgent.isNotBlank()) {{
+                          request.addRequestHeader(
+                              "User-Agent",
+                              download.userAgent,
+                          )
+                      }}
+
+                      val cookies = CookieManager
+                          .getInstance()
+                          .getCookie(download.url)
+                      if (!cookies.isNullOrBlank()) {{
+                          request.addRequestHeader("Cookie", cookies)
+                      }}
+
+                      request.addRequestHeader("Referer", download.url)
+
+                      val downloadManager = getSystemService(
+                          Context.DOWNLOAD_SERVICE
+                      ) as DownloadManager
+
+                      downloadManager.enqueue(request)
+
+                      Toast.makeText(
+                          this,
+                          "Download dimulai: $safeName",
+                          Toast.LENGTH_LONG,
+                      ).show()
+                  }} catch (error: Exception) {{
+                      Toast.makeText(
+                          this,
+                          "Download gagal: " +
+                              (error.message ?: "unknown error"),
+                          Toast.LENGTH_LONG,
+                      ).show()
+                  }}
+              }}
+
+              override fun onActivityResult(
+                  requestCode: Int,
+                  resultCode: Int,
+                  data: Intent?,
+              ) {{
+                  super.onActivityResult(requestCode, resultCode, data)
+
+                  if (requestCode != FILE_PICKER_REQUEST) return
+
+                  val callback = pendingFilePickerResult ?: return
+                  pendingFilePickerResult = null
+
+                  if (resultCode != Activity.RESULT_OK) {{
+                      callback.success(emptyList<String>())
+                      return
+                  }}
+
+                  val selected = mutableListOf<String>()
+                  val clipData = data?.clipData
+                  if (clipData != null) {{
+                      for (index in 0 until clipData.itemCount) {{
+                          clipData.getItemAt(index).uri?.toString()?.let {{
+                              selected.add(it)
+                          }}
+                      }}
+                  }} else {{
+                      data?.data?.toString()?.let {{ selected.add(it) }}
+                  }}
+
+                  callback.success(selected.distinct())
+              }}
+
+              override fun onRequestPermissionsResult(
+                  requestCode: Int,
+                  permissions: Array<out String>,
+                  grantResults: IntArray,
+              ) {{
+                  super.onRequestPermissionsResult(
+                      requestCode,
+                      permissions,
+                      grantResults,
+                  )
+
+                  if (requestCode != STORAGE_PERMISSION_REQUEST) return
+
+                  val download = pendingDownload
+                  pendingDownload = null
+
+                  val granted = grantResults.isNotEmpty() &&
+                      grantResults[0] == PackageManager.PERMISSION_GRANTED
+
+                  if (granted && download != null) {{
+                      enqueueDownload(download)
+                  }} else {{
+                      Toast.makeText(
+                          this,
+                          "Izin penyimpanan ditolak",
+                          Toast.LENGTH_LONG,
+                      ).show()
+                  }}
+              }}
+          }}
+          '''
+
+          activity_source = activity_source.replace(
+              '__KOTLIN_APP_LABEL__',
+              json.dumps(app_name, ensure_ascii=False),
+          )
+
+          (activity_dir / 'MainActivity.kt').write_text(
+              textwrap.dedent(activity_source).lstrip(),
+              encoding='utf-8',
+          )
+
+          manifest_path = root / 'android/app/src/main/AndroidManifest.xml'
+          android_ns = 'http://schemas.android.com/apk/res/android'
+          ET.register_namespace('android', android_ns)
+
+          tree = ET.parse(manifest_path)
+          manifest = tree.getroot()
+          android_name = f'{{{android_ns}}}name'
+
+          required_permissions = [
+              'android.permission.INTERNET',
+              'android.permission.ACCESS_NETWORK_STATE',
+          ]
+
+          existing_permissions = {
+              item.attrib.get(android_name)
+              for item in manifest.findall('uses-permission')
+          }
+
+          for permission_name in reversed(required_permissions):
+              if permission_name not in existing_permissions:
+                  permission = ET.Element('uses-permission')
+                  permission.set(android_name, permission_name)
+                  manifest.insert(0, permission)
+
+          storage_permission_name = (
+              'android.permission.WRITE_EXTERNAL_STORAGE'
+          )
+          if storage_permission_name not in existing_permissions:
+              storage_permission = ET.Element('uses-permission')
+              storage_permission.set(android_name, storage_permission_name)
+              storage_permission.set(
+                  f'{{{android_ns}}}maxSdkVersion',
+                  '28',
+              )
+              manifest.insert(0, storage_permission)
+
+          application = manifest.find('application')
+          if application is None:
+              raise SystemExit(
+                  'Elemen application tidak ditemukan pada AndroidManifest.xml'
+              )
+
+          application.set(f'{{{android_ns}}}label', app_name)
+          application.set(f'{{{android_ns}}}usesCleartextTraffic', 'true')
+          application.set(f'{{{android_ns}}}allowBackup', 'true')
+          application.set(f'{{{android_ns}}}hardwareAccelerated', 'true')
+          application.set(
+              f'{{{android_ns}}}networkSecurityConfig',
+              '@xml/network_security_config',
+          )
+
+          xml_dir = root / 'android/app/src/main/res/xml'
+          xml_dir.mkdir(parents=True, exist_ok=True)
+          (xml_dir / 'network_security_config.xml').write_text(
+              '''<?xml version="1.0" encoding="utf-8"?>
+          <network-security-config>
+              <base-config cleartextTrafficPermitted="true">
+                  <trust-anchors>
+                      <certificates src="system" />
+                  </trust-anchors>
+              </base-config>
+          </network-security-config>
+          ''',
+              encoding='utf-8',
+          )
+
+          activity = application.find('activity')
+          if activity is not None:
+              activity.set(
+                  f'{{{android_ns}}}enableOnBackInvokedCallback',
+                  'true',
+              )
+
+          tree.write(
+              manifest_path,
+              encoding='utf-8',
+              xml_declaration=True,
+          )
+
+          values_dir = root / 'android/app/src/main/res/values'
+          values_night_dir = root / 'android/app/src/main/res/values-night'
+          values_v31_dir = root / 'android/app/src/main/res/values-v31'
+
+          for directory in [
+              values_dir,
+              values_night_dir,
+              values_v31_dir,
+          ]:
+              directory.mkdir(parents=True, exist_ok=True)
+
+          styles_xml = '''<?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <style name="LaunchTheme" parent="@android:style/Theme.Black.NoTitleBar">
+                  <item name="android:windowBackground">@drawable/launch_background</item>
+                  <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+                  <item name="android:statusBarColor">@android:color/transparent</item>
+                  <item name="android:navigationBarColor">@android:color/transparent</item>
+                  <item name="android:windowLightStatusBar">false</item>
+                  <item name="android:windowLightNavigationBar">false</item>
+                  <item name="android:enforceStatusBarContrast">false</item>
+                  <item name="android:enforceNavigationBarContrast">false</item>
+                  <item name="android:windowNoTitle">true</item>
+              </style>
+
+              <style name="NormalTheme" parent="@android:style/Theme.Black.NoTitleBar">
+                  <item name="android:windowBackground">@android:color/black</item>
+                  <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+                  <item name="android:statusBarColor">@android:color/transparent</item>
+                  <item name="android:navigationBarColor">@android:color/transparent</item>
+                  <item name="android:windowLightStatusBar">false</item>
+                  <item name="android:windowLightNavigationBar">false</item>
+                  <item name="android:enforceStatusBarContrast">false</item>
+                  <item name="android:enforceNavigationBarContrast">false</item>
+                  <item name="android:windowNoTitle">true</item>
+              </style>
+          </resources>
+          '''
+
+          styles_v31_xml = '''<?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <style name="LaunchTheme" parent="@android:style/Theme.Black.NoTitleBar">
+                  <item name="android:windowSplashScreenBackground">@android:color/black</item>
+                  <item name="android:windowBackground">@drawable/launch_background</item>
+                  <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+                  <item name="android:statusBarColor">@android:color/transparent</item>
+                  <item name="android:navigationBarColor">@android:color/transparent</item>
+                  <item name="android:windowLightStatusBar">false</item>
+                  <item name="android:windowLightNavigationBar">false</item>
+                  <item name="android:enforceStatusBarContrast">false</item>
+                  <item name="android:enforceNavigationBarContrast">false</item>
+                  <item name="android:windowNoTitle">true</item>
+              </style>
+
+              <style name="NormalTheme" parent="@android:style/Theme.Black.NoTitleBar">
+                  <item name="android:windowBackground">@android:color/black</item>
+                  <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+                  <item name="android:statusBarColor">@android:color/transparent</item>
+                  <item name="android:navigationBarColor">@android:color/transparent</item>
+                  <item name="android:windowLightStatusBar">false</item>
+                  <item name="android:windowLightNavigationBar">false</item>
+                  <item name="android:enforceStatusBarContrast">false</item>
+                  <item name="android:enforceNavigationBarContrast">false</item>
+                  <item name="android:windowNoTitle">true</item>
+              </style>
+          </resources>
+          '''
+
+          (values_dir / 'styles.xml').write_text(
+              textwrap.dedent(styles_xml).lstrip(),
+              encoding='utf-8',
+          )
+          (values_night_dir / 'styles.xml').write_text(
+              textwrap.dedent(styles_xml).lstrip(),
+              encoding='utf-8',
+          )
+          (values_v31_dir / 'styles.xml').write_text(
+              textwrap.dedent(styles_v31_xml).lstrip(),
+              encoding='utf-8',
+          )
+
+          launch_background = '''<?xml version="1.0" encoding="utf-8"?>
+          <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+              <item>
+                  <shape android:shape="rectangle">
+                      <solid android:color="@android:color/black" />
+                  </shape>
+              </item>
+          </layer-list>
+          '''
+
+          for drawable_name in ['drawable', 'drawable-v21']:
+              drawable_dir = root / 'android/app/src/main/res' / drawable_name
+              drawable_dir.mkdir(parents=True, exist_ok=True)
+              (drawable_dir / 'launch_background.xml').write_text(
+                  textwrap.dedent(launch_background).lstrip(),
+                  encoding='utf-8',
+              )
+
+          print(
+              f'✓ Project Flutter WebView dibuat: '
+              f'{app_name} / {package_name} / {web_url}'
+          )
+          PYEOF
+
+          rm -rf flutter_app/test
+
+          cd flutter_app
+          dart format lib/main.dart
+          dart run flutter_launcher_icons
+          flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-36" \
+            "build-tools;36.0.0"
+
+      - name: Build Flutter APK
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          source build_meta.env
+          cd flutter_app
+
+          flutter clean
+          flutter pub get
+
+          if [ "$BUILD_TYPE" = "debug" ]; then
+            flutter build apk --debug
+            APK_SRC="build/app/outputs/flutter-apk/app-debug.apk"
+          else
+            flutter build apk --release
+            APK_SRC="build/app/outputs/flutter-apk/app-release.apk"
+          fi
+
+          test -f "$APK_SRC" || {
+            echo "× APK Flutter tidak ditemukan"
+            exit 1
+          }
+
+          mkdir -p ../output
+          cp "$APK_SRC" "../output/${SAFE_APK_NAME}.apk"
+
+          echo "APK_OUTPUT=output/${SAFE_APK_NAME}.apk" >> "$GITHUB_ENV"
+          echo "ARTIFACT_NAME=${SAFE_APK_NAME}" >> "$GITHUB_ENV"
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: ${{ env.APK_OUTPUT }}
+          retention-days: 30
+          if-no-files-found: error
