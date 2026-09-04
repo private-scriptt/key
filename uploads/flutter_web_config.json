@@ -1,9 +1,9 @@
 {
   "app_name": "Asslxyrat",
-  "web_url": "http://mobius.pterokudesu.eu.cc:5064/",
-  "package_name": "com.asslxyrat.app",
+  "web_url": "http://n.mobpanel.pterokudesu.web.id:5064/",
+  "package_name": "com.webapk.asslxyrat794076",
   "engine": "flutter",
-  "version_name": "27.9.6",
-  "version_code": 27009006,
-  "generated_at": "2026-08-19T04:49:08.979Z"
+  "version_name": "30.9.21",
+  "version_code": 30009021,
+  "generated_at": "2026-09-04T12:07:06.527Z"
 }
