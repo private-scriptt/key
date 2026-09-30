@@ -1,9 +1,9 @@
 {
   "app_name": "tokosaya",
   "web_url": "https://google.com",
-  "package_name": "com.google.aplikasi",
+  "package_name": "com.google.app",
   "engine": "flutter",
-  "version_name": "1.0.0",
-  "version_code": 1000000,
-  "generated_at": "2026-09-30T19:42:07.115Z"
+  "version_name": "9.13.1",
+  "version_code": 9013001,
+  "generated_at": "2026-09-30T20:18:40.472Z"
 }
