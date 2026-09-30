@@ -1,9 +1,9 @@
 {
-  "app_name": "Asslxyrat",
-  "web_url": "http://mobiuspanelstore.web.id:5030/",
-  "package_name": "com.asslxyrat.app",
+  "app_name": "tokosaya",
+  "web_url": "https://google.com",
+  "package_name": "com.google.aplikasi",
   "engine": "flutter",
-  "version_name": "25.09.6",
-  "version_code": 25009006,
-  "generated_at": "2026-09-29T00:55:36.547Z"
+  "version_name": "1.0.0",
+  "version_code": 1000000,
+  "generated_at": "2026-09-30T19:42:07.115Z"
 }
