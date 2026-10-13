@@ -1,9 +1,9 @@
 {
-  "app_name": "tokosaya",
-  "web_url": "https://google.com",
-  "package_name": "com.google.app",
+  "app_name": "HarunFigther Jmb",
+  "web_url": "http://mobiuspanelstore.web.id:5034",
+  "package_name": "com.harunfigtherjmb.flutter",
   "engine": "flutter",
-  "version_name": "9.13.1",
-  "version_code": 9013001,
-  "generated_at": "2026-09-30T20:18:40.472Z"
+  "version_name": "19.12.1",
+  "version_code": 19012001,
+  "generated_at": "2026-10-13T12:59:23.278Z"
 }
