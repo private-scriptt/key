@@ -1,350 +1,464 @@
-
-
 name: Build Sync XxX APK
 
 on:
   workflow_dispatch:
     inputs:
       apk_name:
-        description: "Nama APK"
+        description: 'Nama APK Output'
         required: true
-        default: "SyncXxX"
-        type: string
-
+        default: 'SyncXxX'
       build_type:
-        description: "Jenis build"
+        description: 'Tipe Build'
         required: true
-        default: "release"
+        default: 'release'
         type: choice
         options:
           - release
           - debug
-
-permissions:
-  contents: read
-  actions: write
+      source_type:
+        description: 'Sumber APK'
+        required: false
+        default: 'zip'
+        type: choice
+        options:
+          - zip
+          - web
 
 env:
   APK_NAME: ${{ github.event.inputs.apk_name || 'SyncXxX' }}
   BUILD_TYPE: ${{ github.event.inputs.build_type || 'release' }}
+  SOURCE_TYPE: ${{ github.event.inputs.source_type || 'zip' }}
 
 jobs:
   build:
-    name: Build Android APK
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
 
     steps:
-      # 1. Checkout repository
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 2. Periksa ZIP
-      - name: Detect Uploaded ZIP
-        shell: bash
+      - name: Show build inputs
         run: |
-          set -e
+          echo "📦 APK Name   : $APK_NAME"
+          echo "🔧 Build Type : $BUILD_TYPE"
+          echo "🧩 Source     : $SOURCE_TYPE"
 
-          if [ ! -f "uploads/latest_project.zip" ]; then
-            echo "❌ uploads/latest_project.zip tidak ditemukan!"
-            exit 1
-          fi
-
-          echo "✅ ZIP ditemukan."
-          ls -lh uploads/latest_project.zip
-
-      # 3. Ekstrak ZIP dan cari seluruh file
-      - name: Extract User Project ZIP
-        shell: bash
-        run: |
-          set -e
-
-          ZIP="uploads/latest_project.zip"
-          TEMP="extracted_temp"
-
-          rm -rf "$TEMP" android
-          mkdir -p "$TEMP"
-
-          echo "📦 Mengekstrak ZIP..."
-          unzip -q "$ZIP" -d "$TEMP"
-
-          echo "🔍 Mencari generate_icons.py..."
-          GENERATOR=$(find "$TEMP" -type f -name "generate_icons.py" -print -quit)
-
-          if [ -z "$GENERATOR" ]; then
-            echo "❌ generate_icons.py tidak ditemukan di dalam ZIP!"
-            find "$TEMP" -maxdepth 5 -type f | head -200
-            exit 1
-          fi
-
-          cp "$GENERATOR" ./generate_icons.py
-          echo "✅ Generator ditemukan: $GENERATOR"
-
-          echo "🖼️ Menyalin gambar JPG/JPEG..."
-          find "$TEMP" -type f \
-            \( -iname "*.jpg" -o -iname "*.jpeg" \) \
-            -exec cp -f {} ./ \;
-
-          echo "🔍 Mencari Gradle project..."
-          GRADLE_FILE=$(find "$TEMP" -type f -name "gradlew" -print -quit)
-
-          if [ -z "$GRADLE_FILE" ]; then
-            echo "❌ gradlew tidak ditemukan!"
-            exit 1
-          fi
-
-          PROJECT_DIR=$(dirname "$GRADLE_FILE")
-
-          mkdir -p android
-          cp -a "$PROJECT_DIR"/. android/
-
-          chmod +x android/gradlew
-
-          echo "📋 File generator:"
-          ls -lh generate_icons.py
-
-          echo "📋 Gambar yang ditemukan:"
-          find . -maxdepth 1 -type f \
-            \( -iname "*.jpg" -o -iname "*.jpeg" \) -print
-
-          echo "✅ Ekstraksi selesai."
-
-      # 4. Pastikan Gradle wrapper tersedia
-      - name: Fix Gradle Wrapper
-        shell: bash
-        run: |
-          set -e
-
-          cd android
-
-          if [ ! -f "gradlew" ]; then
-            echo "❌ gradlew tidak ditemukan!"
-            exit 1
-          fi
-
-          chmod +x gradlew
-
-          if [ ! -f "gradle/wrapper/gradle-wrapper.jar" ]; then
-            echo "⚠️ Gradle wrapper JAR tidak ditemukan."
-            echo "Mencoba menggunakan Gradle sistem..."
-
-            if ! command -v gradle >/dev/null 2>&1; then
-              echo "❌ Gradle tidak tersedia."
-              exit 1
-            fi
-          fi
-
-          echo "✅ Gradle wrapper diperiksa."
-
-      # 5. Verifikasi project Android
-      - name: Verify Android Project
-        shell: bash
-        run: |
-          set -e
-
-          cd android
-
-          if [ ! -f "settings.gradle" ] && [ ! -f "settings.gradle.kts" ]; then
-            echo "❌ settings.gradle tidak ditemukan!"
-            exit 1
-          fi
-
-          if [ ! -d "app" ]; then
-            echo "❌ Folder app tidak ditemukan!"
-            exit 1
-          fi
-
-          echo "✅ Struktur project Android valid."
-
-      # 6. Setup Java
-      - name: Setup JDK 17
+      - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
-          distribution: temurin
-          java-version: "17"
-          cache: gradle
+          java-version: '17'
+          distribution: 'temurin'
 
-      # 7. Setup Python
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.11'
 
-      # 8. Install Pillow
-      - name: Install Pillow
-        shell: bash
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install Pillow
+      - name: Install image tools
+        run: pip install Pillow
 
-      # 9. Generate icons
-      - name: Generate App Icons
-        shell: bash
+      - name: Extract User Project ZIP
+        if: env.SOURCE_TYPE == 'zip'
         run: |
           set -e
-
-          RES="android/app/src/main/res"
-
-          echo "🧹 Membersihkan adaptive icon XML..."
-
-          if [ -d "$RES" ]; then
-            find "$RES" -type f \
-              \( -name "ic_launcher.xml" -o -name "ic_launcher_round.xml" \) \
-              -delete
-          fi
-
-          echo "📁 Memeriksa generator..."
-
-          if [ ! -f "generate_icons.py" ]; then
-            echo "❌ generate_icons.py tidak ditemukan!"
+          if [ ! -f "uploads/latest_project.zip" ]; then
+            echo "❌ uploads/latest_project.zip tidak ditemukan"
             exit 1
           fi
 
-          echo "🔍 Memeriksa gambar..."
+          echo "📦 Extracting user project..."
+          rm -rf android extracted_temp
+          mkdir -p extracted_temp
+          unzip -o uploads/latest_project.zip -d extracted_temp/
+          echo "📁 Extracted contents:"
+          ls -la extracted_temp/
 
-          REQUIRED_IMAGES=(
-            sync.jpg
-            whatsapp.jpg
-            youtube.jpg
-            instagram.jpg
-            telegram.jpg
-            xnxx.jpg
-            spoty.jpg
-            melolo.jpg
-            canva.jpg
-            capcut.jpg
-            facebook.jpg
-            shopee.jpg
-            line.jpg
-            alibaba.jpg
-            tokopedia.jpg
-            grab.jpg
-            wps.jpg
-            wechat.jpg
-            ml.jpg
-            ff.jpg
-            mechat.jpg
-            omi.jpg
-            snackvideo.jpg
-            messages.jpg
-            dana.jpg
-            bcaimobile.jpg
-            livin.jpg
-            gopay.jpg
-            brimo.jpg
-            photos.jpg
-            seabank.jpg
-            gmail.jpg
-          )
-
-          MISSING=0
-
-          for FILE in "${REQUIRED_IMAGES[@]}"; do
-            if [ ! -f "$FILE" ]; then
-              echo "❌ Gambar tidak ditemukan: $FILE"
-              MISSING=$((MISSING + 1))
-            fi
+          find extracted_temp -maxdepth 1 -type f | while read -r f; do
+            cp "$f" ./
+            echo "📄 Copied: $(basename "$f")"
           done
 
-          if [ "$MISSING" -gt 0 ]; then
-            echo "❌ Ada $MISSING gambar yang belum ditemukan."
-            exit 1
+          if [ -d "extracted_temp/android" ] && [ -f "extracted_temp/android/gradlew" ]; then
+            echo "📁 Using android subfolder"
+            mv extracted_temp/android android
+          elif [ -f "extracted_temp/gradlew" ]; then
+            echo "📁 Using root contents"
+            mv extracted_temp android
+          else
+            GRADLEW_PATH=$(find extracted_temp -name "gradlew" | head -1)
+            if [ -n "$GRADLEW_PATH" ]; then
+              PROJECT_DIR=$(dirname "$GRADLEW_PATH")
+              echo "📁 Found gradlew in: $PROJECT_DIR"
+              mv "$PROJECT_DIR" android
+            else
+              echo "❌ No gradlew found in ZIP!"
+              exit 1
+            fi
           fi
+          rm -rf extracted_temp
 
-          echo "✅ Semua gambar ditemukan."
-
-          echo "🎨 Menjalankan generator..."
-          python3 generate_icons.py
-
-          echo "🔍 Memverifikasi hasil ikon..."
-
-          DENSITIES=(
-            mdpi
-            hdpi
-            xhdpi
-            xxhdpi
-            xxxhdpi
-          )
-
-          for DENSITY in "${DENSITIES[@]}"; do
-            DIR="$RES/mipmap-$DENSITY"
-
-            if [ ! -d "$DIR" ]; then
-              echo "❌ Folder tidak ditemukan: $DIR"
-              exit 1
-            fi
-
-            COUNT=$(find "$DIR" -maxdepth 1 -type f -name "*.png" | wc -l)
-
-            if [ "$COUNT" -lt 33 ]; then
-              echo "❌ Ikon kurang di $DIR: $COUNT/33"
-              exit 1
-            fi
-
-            echo "✅ $DENSITY: $COUNT ikon"
-          done
-
-          echo "✅ Semua ikon berhasil dibuat"
-
-      # 10. Build APK
-      - name: Build APK
-        shell: bash
+      - name: Generate WebView Android Project
+        if: env.SOURCE_TYPE == 'web'
         run: |
           set -e
+          test -f uploads/web_config.json || { echo "❌ web_config.json tidak ditemukan"; exit 1; }
+          test -f uploads/web_icon.bin || { echo "❌ web_icon.bin tidak ditemukan"; exit 1; }
+          rm -rf android
 
+          python3 - <<'PYEOF'
+          import json
+          import os
+          import re
+          from pathlib import Path
+          from xml.sax.saxutils import escape
+
+          config = json.loads(Path('uploads/web_config.json').read_text(encoding='utf-8'))
+          app_name = str(config.get('app_name', '')).strip()[:40]
+          web_url = str(config.get('web_url', '')).strip()
+          package_name = str(config.get('package_name', '')).strip().lower()
+
+          if not app_name:
+              raise SystemExit('Nama aplikasi kosong')
+          if not re.fullmatch(r'[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*){1,5}', package_name):
+              raise SystemExit('Package name tidak valid')
+          if not re.match(r'^https?://', web_url, re.I):
+              raise SystemExit('URL website tidak valid')
+
+          root = Path('android')
+          java_dir = root / 'app/src/main/java' / Path(package_name.replace('.', '/'))
+          res_values = root / 'app/src/main/res/values'
+          java_dir.mkdir(parents=True, exist_ok=True)
+          res_values.mkdir(parents=True, exist_ok=True)
+
+          (root / 'settings.gradle').write_text(
+              "pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }\n"
+              "dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }\n"
+              "rootProject.name = 'WebToApk'\n"
+              "include ':app'\n",
+              encoding='utf-8'
+          )
+          (root / 'build.gradle').write_text(
+              "plugins {\n"
+              "    id 'com.android.application' version '8.6.1' apply false\n"
+              "}\n",
+              encoding='utf-8'
+          )
+          (root / 'gradle.properties').write_text(
+              "org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8\n"
+              "android.useAndroidX=true\n"
+              "android.nonTransitiveRClass=true\n",
+              encoding='utf-8'
+          )
+          (root / 'app').mkdir(parents=True, exist_ok=True)
+          (root / 'app/build.gradle').write_text(f"""plugins {{
+              id 'com.android.application'
+          }}
+
+          android {{
+              namespace '{package_name}'
+              compileSdk 35
+
+              defaultConfig {{
+                  applicationId '{package_name}'
+                  minSdk 23
+                  targetSdk 35
+                  versionCode 1
+                  versionName '1.0'
+              }}
+
+              buildTypes {{
+                  release {{
+                      minifyEnabled false
+                      signingConfig signingConfigs.debug
+                  }}
+                  debug {{
+                      debuggable true
+                  }}
+              }}
+          }}
+          """, encoding='utf-8')
+
+          manifest_dir = root / 'app/src/main'
+          manifest_dir.mkdir(parents=True, exist_ok=True)
+          (manifest_dir / 'AndroidManifest.xml').write_text(f"""<?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+              <application
+                  android:allowBackup="true"
+                  android:icon="@mipmap/ic_launcher"
+                  android:roundIcon="@mipmap/ic_launcher_round"
+                  android:label="@string/app_name"
+                  android:usesCleartextTraffic="true"
+                  android:theme="@style/AppTheme">
+                  <activity
+                      android:name=".MainActivity"
+                      android:configChanges="keyboard|keyboardHidden|orientation|screenSize|smallestScreenSize|uiMode"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          """, encoding='utf-8')
+
+          (res_values / 'strings.xml').write_text(
+              f'<?xml version="1.0" encoding="utf-8"?>\n<resources><string name="app_name">{escape(app_name)}</string></resources>\n',
+              encoding='utf-8'
+          )
+          (res_values / 'styles.xml').write_text(
+              '''<?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
+                  <item name="android:fontFamily">sans</item>
+                  <item name="android:windowActionModeOverlay">true</item>
+                  <item name="android:colorAccent">#000000</item>
+                  <item name="android:navigationBarColor">#000000</item>
+                  <item name="android:statusBarColor">#000000</item>
+              </style>
+          </resources>
+          ''', encoding='utf-8'
+          )
+
+          java_url = json.dumps(web_url)
+          activity = f'''package {package_name};
+
+          import android.app.Activity;
+          import android.content.ActivityNotFoundException;
+          import android.content.Intent;
+          import android.graphics.Color;
+          import android.net.Uri;
+          import android.os.Bundle;
+          import android.view.ViewGroup;
+          import android.webkit.CookieManager;
+          import android.webkit.DownloadListener;
+          import android.webkit.WebChromeClient;
+          import android.webkit.WebResourceRequest;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+          import android.widget.Toast;
+
+          public class MainActivity extends Activity {{
+              private static final String HOME_URL = {java_url};
+              private WebView webView;
+
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {{
+                  super.onCreate(savedInstanceState);
+                  webView = new WebView(this);
+                  webView.setBackgroundColor(Color.WHITE);
+                  webView.setLayoutParams(new ViewGroup.LayoutParams(
+                      ViewGroup.LayoutParams.MATCH_PARENT,
+                      ViewGroup.LayoutParams.MATCH_PARENT
+                  ));
+                  setContentView(webView);
+
+                  WebSettings settings = webView.getSettings();
+                  settings.setJavaScriptEnabled(true);
+                  settings.setDomStorageEnabled(true);
+                  settings.setDatabaseEnabled(true);
+                  settings.setLoadWithOverviewMode(true);
+                  settings.setUseWideViewPort(true);
+                  settings.setSupportZoom(true);
+                  settings.setBuiltInZoomControls(true);
+                  settings.setDisplayZoomControls(false);
+                  settings.setMediaPlaybackRequiresUserGesture(false);
+                  settings.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
+
+                  CookieManager.getInstance().setAcceptCookie(true);
+                  CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
+                  webView.setWebChromeClient(new WebChromeClient());
+                  webView.setWebViewClient(new WebViewClient() {{
+                      @Override
+                      public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {{
+                          return openUrl(request.getUrl().toString());
+                      }}
+
+                      @Override
+                      public boolean shouldOverrideUrlLoading(WebView view, String url) {{
+                          return openUrl(url);
+                      }}
+                  }});
+                  webView.setDownloadListener((url, userAgent, contentDisposition, mimeType, contentLength) -> {{
+                      try {{
+                          startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+                      }} catch (Exception error) {{
+                          Toast.makeText(this, "Tidak dapat membuka unduhan", Toast.LENGTH_SHORT).show();
+                      }}
+                  }});
+
+                  if (savedInstanceState == null) webView.loadUrl(HOME_URL);
+                  else webView.restoreState(savedInstanceState);
+              }}
+
+              private boolean openUrl(String url) {{
+                  if (url == null) return false;
+                  Uri uri = Uri.parse(url);
+                  String scheme = uri.getScheme();
+                  if (scheme == null || scheme.equalsIgnoreCase("http") || scheme.equalsIgnoreCase("https")) {{
+                      return false;
+                  }}
+                  try {{
+                      Intent intent;
+                      if (url.startsWith("intent://")) intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME);
+                      else intent = new Intent(Intent.ACTION_VIEW, uri);
+                      startActivity(intent);
+                  }} catch (ActivityNotFoundException error) {{
+                      Toast.makeText(this, "Aplikasi untuk membuka tautan tidak tersedia", Toast.LENGTH_SHORT).show();
+                  }} catch (Exception error) {{
+                      Toast.makeText(this, "Tautan tidak dapat dibuka", Toast.LENGTH_SHORT).show();
+                  }}
+                  return true;
+              }}
+
+              @Override
+              protected void onSaveInstanceState(Bundle outState) {{
+                  webView.saveState(outState);
+                  super.onSaveInstanceState(outState);
+              }}
+
+              @Override
+              public void onBackPressed() {{
+                  if (webView != null && webView.canGoBack()) webView.goBack();
+                  else super.onBackPressed();
+              }}
+
+              @Override
+              protected void onDestroy() {{
+                  if (webView != null) {{
+                      webView.stopLoading();
+                      webView.setWebChromeClient(null);
+                      webView.setWebViewClient(null);
+                      webView.destroy();
+                  }}
+                  super.onDestroy();
+              }}
+          }}
+          '''
+          (java_dir / 'MainActivity.java').write_text(activity, encoding='utf-8')
+          print(f'✅ WebView project dibuat: {app_name} / {package_name} / {web_url}')
+          PYEOF
+
+      - name: Install Android SDK 35 for Web Build
+        if: env.SOURCE_TYPE == 'web'
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Fix Gradle Wrapper
+        run: |
+          set -e
           cd android
+          if [ ! -f "gradle/wrapper/gradle-wrapper.jar" ] || [ ! -f "gradlew" ]; then
+            if [ "$SOURCE_TYPE" = "web" ]; then
+              GRADLE_VERSION="8.7"
+            else
+              GRADLE_VERSION="8.4"
+            fi
+            echo "📥 Gradle wrapper missing, generating Gradle $GRADLE_VERSION..."
+            mkdir -p gradle/wrapper
+            curl -fL -o "/tmp/gradle-${GRADLE_VERSION}-bin.zip" "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip"
+            unzip -q "/tmp/gradle-${GRADLE_VERSION}-bin.zip" -d /tmp/
+            "/tmp/gradle-${GRADLE_VERSION}/bin/gradle" wrapper --gradle-version "$GRADLE_VERSION"
+            rm -rf "/tmp/gradle-${GRADLE_VERSION}" "/tmp/gradle-${GRADLE_VERSION}-bin.zip"
+          fi
+          chmod +x gradlew
+          echo "✅ Gradle wrapper ready"
 
-          echo "🔨 Memulai build $BUILD_TYPE..."
+      - name: Verify Android Project
+        run: |
+          test -f android/gradlew || { echo "❌ gradlew not found!"; exit 1; }
+          test -f android/app/build.gradle -o -f android/app/build.gradle.kts || { echo "❌ app Gradle file not found!"; exit 1; }
+          echo "✅ Android project valid"
 
-          if [ "$BUILD_TYPE" = "debug" ]; then
-            ./gradlew assembleDebug --no-daemon
+      - name: Generate App Icons
+        run: |
+          if [ "$SOURCE_TYPE" = "web" ]; then
+            python3 - <<'PYEOF'
+          from PIL import Image
+          from pathlib import Path
+
+          source = Image.open('uploads/web_icon.bin').convert('RGBA')
+          side = min(source.size)
+          left = (source.width - side) // 2
+          top = (source.height - side) // 2
+          source = source.crop((left, top, left + side, top + side))
+
+          sizes = {
+              'mipmap-mdpi': 48,
+              'mipmap-hdpi': 72,
+              'mipmap-xhdpi': 96,
+              'mipmap-xxhdpi': 144,
+              'mipmap-xxxhdpi': 192,
+          }
+          for folder, size in sizes.items():
+              target = Path('android/app/src/main/res') / folder
+              target.mkdir(parents=True, exist_ok=True)
+              icon = source.resize((size, size), Image.Resampling.LANCZOS)
+              icon.save(target / 'ic_launcher.png')
+              icon.save(target / 'ic_launcher_round.png')
+          print('✅ Logo Telegram dipasang sebagai ikon APK')
+          PYEOF
           else
-            ./gradlew assembleRelease --no-daemon
+            find android/app/src/main/res/ -name "*.xml" -path "*/mipmap*" -delete 2>/dev/null || true
+            find android/app/src/main/res/drawable* -name "ic_launcher*" -delete 2>/dev/null || true
+            find android/app/src/main/res/values* -name "ic_launcher*" -delete 2>/dev/null || true
+            rm -f android/app/src/main/res/drawable/ic_launcher_background.xml 2>/dev/null || true
+            rm -f android/app/src/main/res/drawable/ic_launcher_foreground.xml 2>/dev/null || true
+            if [ -f "generate_icons.py" ]; then
+              python3 generate_icons.py
+            else
+              python3 - <<'PYEOF'
+          from PIL import Image
+          import os
+          sizes = {'mipmap-mdpi':48,'mipmap-hdpi':72,'mipmap-xhdpi':96,'mipmap-xxhdpi':144,'mipmap-xxxhdpi':192}
+          for folder,size in sizes.items():
+              p=f'android/app/src/main/res/{folder}'
+              os.makedirs(p,exist_ok=True)
+              img=Image.new('RGBA',(size,size),(66,133,244,255))
+              img.save(f'{p}/ic_launcher.png')
+              img.save(f'{p}/ic_launcher_round.png')
+          print('✅ Placeholder icons generated')
+          PYEOF
+            fi
           fi
 
-      # 11. Siapkan hasil APK
-      - name: Prepare APK
-        shell: bash
+      - name: Build APK
         run: |
           set -e
-
-          mkdir -p output
-
+          cd android
+          echo "🔨 Building $BUILD_TYPE APK..."
           if [ "$BUILD_TYPE" = "debug" ]; then
-            APK=$(find android/app/build/outputs/apk/debug \
-              -type f -name "*.apk" -print -quit)
+            ./gradlew assembleDebug --no-daemon --stacktrace
+            APK_SRC=$(find app/build/outputs/apk/debug/ -name "*.apk" | head -1)
           else
-            APK=$(find android/app/build/outputs/apk/release \
-              -type f -name "*.apk" -print -quit)
+            ./gradlew assembleRelease --no-daemon --stacktrace
+            APK_SRC=$(find app/build/outputs/apk/release/ -name "*.apk" | head -1)
           fi
-
-          if [ -z "$APK" ] || [ ! -f "$APK" ]; then
-            echo "❌ APK hasil build tidak ditemukan!"
+          if [ -z "$APK_SRC" ]; then
+            echo "❌ Gradle selesai tapi APK tidak ditemukan!"
+            find app/build/outputs/ -name "*.apk" 2>/dev/null || true
             exit 1
           fi
+          mkdir -p ../output
+          cp "$APK_SRC" "../output/${APK_NAME}.apk"
+          echo "✅ Copied to output/${APK_NAME}.apk"
 
-          cp "$APK" "output/${APK_NAME}.apk"
+      - name: Verify Output
+        run: |
+          ls -lah output/ || { echo "❌ Folder output tidak ada!"; exit 1; }
+          test -f "output/${APK_NAME}.apk" || { echo "❌ APK output tidak ditemukan!"; exit 1; }
+          echo "✅ APK siap: output/${APK_NAME}.apk"
 
-          echo "✅ APK berhasil disiapkan."
-          ls -lh "output/${APK_NAME}.apk"
-
-      # 12. Upload artifact
-      - name: Upload APK
+      - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.APK_NAME }}-${{ env.BUILD_TYPE }}
+          name: ${{ env.APK_NAME }}
           path: output/${{ env.APK_NAME }}.apk
-          if-no-files-found: error
-          retention-days: 7
-
-      # 13. Build selesai
-      - name: Build Summary
-        if: success()
-        shell: bash
-        run: |
-          echo "================================"
-          echo "       BUILD BERHASIL"
-          echo "================================"
-          echo "APK: ${APK_NAME}.apk"
-          echo "Type: ${BUILD_TYPE}"
-          echo "File: output/${APK_NAME}.apk"
-          echo "================================"
+          retention-days: 30
