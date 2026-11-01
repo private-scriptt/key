@@ -30,17 +30,14 @@ jobs:
       actions: write
 
     steps:
-      # 1. Checkout repository
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 2. Tampilkan konfigurasi
       - name: Show Build Inputs
         run: |
           echo "APK Name: $APK_NAME"
           echo "Build Type: $BUILD_TYPE"
 
-      # 3. Pastikan project sudah di-upload oleh bot
       - name: Verify Android Project
         run: |
           if [ ! -d "android" ]; then
@@ -55,33 +52,29 @@ jobs:
 
           if [ ! -f "android/app/build.gradle" ] && \
              [ ! -f "android/app/build.gradle.kts" ]; then
-            echo "ERROR: File konfigurasi app Gradle tidak ditemukan!"
+            echo "ERROR: Konfigurasi Gradle tidak ditemukan!"
             exit 1
           fi
 
           echo "Android project ditemukan."
           ls -la android/
 
-      # 4. Siapkan Java
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
 
-      # 5. Siapkan Python
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      # 6. Install Pillow
       - name: Install Pillow
         run: |
           python -m pip install --upgrade pip
           pip install Pillow
 
-      # 7. Siapkan Gradle Wrapper
       - name: Fix Gradle Wrapper
         run: |
           cd android
@@ -123,27 +116,47 @@ jobs:
           chmod +x gradlew
           echo "Gradle Wrapper siap."
 
-      # 8. Generate ikon dari script project jika tersedia
-      - name: Generate App Icons
-        run: |
-          if [ -f "generate_icons.py" ]; then
-            echo "Menjalankan generate_icons.py..."
-            python generate_icons.py
-          else
-            echo "generate_icons.py tidak ditemukan."
-            echo "Melanjutkan pemeriksaan ikon otomatis."
-          fi
-
-      # 9. Buat resource ikon yang benar-benar belum tersedia
-      - name: Verify and Repair Missing Icons
+      # Gunakan sync.jpg sebagai sumber ikon launcher.
+      # File JPG asli tidak dihapus atau diubah.
+      - name: Generate Launcher Icons
         run: |
           python3 - <<'PY'
           import os
-          import re
-          from PIL import Image, ImageDraw
+          from PIL import Image
+
+          candidates = [
+              "sync.jpg",
+              "sync.jpeg",
+              "android/sync.jpg",
+              "android/app/sync.jpg",
+              "android/app/src/main/res/drawable/sync.jpg",
+              "android/app/src/main/res/drawable-nodpi/sync.jpg"
+          ]
+
+          source = next(
+              (p for p in candidates if os.path.isfile(p)),
+              None
+          )
+
+          if not source:
+              for folder, _, files in os.walk("."):
+                  if ".git" in folder.split(os.sep):
+                      continue
+
+                  for filename in files:
+                      if filename.lower() == "sync.jpg":
+                          source = os.path.join(folder, filename)
+                          break
+
+                  if source:
+                      break
+
+          if not source:
+              raise SystemExit("ERROR: sync.jpg tidak ditemukan!")
+
+          print("Sumber ikon:", source)
 
           base = "android/app/src/main/res"
-          manifest = "android/app/src/main/AndroidManifest.xml"
 
           densities = {
               "mipmap-mdpi": 48,
@@ -153,120 +166,51 @@ jobs:
               "mipmap-xxxhdpi": 192
           }
 
-          if not os.path.isfile(manifest):
-              raise SystemExit("AndroidManifest.xml tidak ditemukan!")
+          with Image.open(source) as original:
+              image = original.convert("RGB")
 
-          with open(manifest, "r", encoding="utf-8") as f:
-              content = f.read()
+              for folder, size in densities.items():
+                  output_dir = os.path.join(base, folder)
+                  os.makedirs(output_dir, exist_ok=True)
 
-          # Ambil semua referensi mipmap dari Manifest
-          names = sorted(set(re.findall(
-              r"@mipmap/([a-zA-Z0-9_]+)",
-              content
-          )))
-
-          print("Resource mipmap ditemukan:", len(names))
-
-          if not names:
-              raise SystemExit("Tidak ada referensi mipmap di Manifest!")
-
-          def placeholder(size, name):
-              img = Image.new(
-                  "RGBA",
-                  (size, size),
-                  (8, 12, 16, 255)
-              )
-
-              draw = ImageDraw.Draw(img)
-              draw.ellipse(
-                  [
-                      size // 4,
-                      size // 4,
-                      size * 3 // 4,
-                      size * 3 // 4
-                  ],
-                  fill=(0, 212, 255, 255)
-              )
-
-              return img
-
-          created = 0
-          existing = 0
-
-          for folder, size in densities.items():
-              out_dir = os.path.join(base, folder)
-              os.makedirs(out_dir, exist_ok=True)
-
-              for name in names:
-                  target = os.path.join(
-                      out_dir,
-                      name + ".png"
+                  resized = image.resize(
+                      (size, size),
+                      Image.Resampling.LANCZOS
                   )
 
-                  if os.path.isfile(target):
-                      existing += 1
-                      continue
+                  for name in [
+                      "ic_launcher",
+                      "ic_launcher_round"
+                  ]:
+                      target = os.path.join(
+                          output_dir,
+                          name + ".jpg"
+                      )
 
-                  img = placeholder(size, name)
-                  img.save(target, "PNG")
+                      resized.save(target, format="jpg")
+                      print("Dibuat:", target)
 
-                  print("Dibuat:", target)
-                  created += 1
-
-          print("Ikon sudah tersedia:", existing)
-          print("Placeholder dibuat:", created)
-          print("Pemeriksaan ikon selesai.")
+          print("Launcher icons selesai dibuat.")
+          print("JPG sumber tetap dipertahankan.")
           PY
 
-      # 10. Pastikan semua referensi mipmap tersedia
-      - name: Final Icon Check
+      - name: Verify Launcher Icons
         run: |
-          python3 - <<'PY'
-          import os
-          import re
+          set -e
 
-          manifest = "android/app/src/main/AndroidManifest.xml"
-          base = "android/app/src/main/res"
+          for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
+            for icon in ic_launcher ic_launcher_round; do
+              FILE="android/app/src/main/res/mipmap-${density}/${icon}.jpg"
 
-          with open(manifest, encoding="utf-8") as f:
-              content = f.read()
+              if [ ! -s "$FILE" ]; then
+                echo "ERROR: $FILE tidak ditemukan!"
+                exit 1
+              fi
+            done
+          done
 
-          names = set(re.findall(
-              r"@mipmap/([a-zA-Z0-9_]+)",
-              content
-          ))
+          echo "Semua ikon launcher tersedia."
 
-          densities = [
-              "mipmap-mdpi",
-              "mipmap-hdpi",
-              "mipmap-xhdpi",
-              "mipmap-xxhdpi",
-              "mipmap-xxxhdpi"
-          ]
-
-          missing = []
-
-          for name in sorted(names):
-              for density in densities:
-                  path = os.path.join(
-                      base,
-                      density,
-                      name + ".png"
-                  )
-
-                  if not os.path.isfile(path):
-                      missing.append(path)
-
-          if missing:
-              print("Resource masih hilang:")
-              for item in missing:
-                  print(item)
-              raise SystemExit(1)
-
-          print("Semua referensi mipmap memiliki PNG.")
-          PY
-
-      # 11. Build APK
       - name: Build APK
         run: |
           set -e
@@ -289,14 +233,9 @@ jobs:
 
           if [ -z "$APK_SRC" ]; then
             echo "ERROR: APK tidak ditemukan!"
-
-            find app/build/outputs/ \
-              -name "*.apk" 2>/dev/null || true
-
+            find app/build/outputs/ -name "*.apk" || true
             exit 1
           fi
-
-          echo "APK ditemukan: $APK_SRC"
 
           mkdir -p ../output
 
@@ -304,7 +243,6 @@ jobs:
 
           echo "APK berhasil disiapkan."
 
-      # 12. Verifikasi APK
       - name: Verify Output
         run: |
           if [ ! -s "output/${APK_NAME}.apk" ]; then
@@ -313,10 +251,8 @@ jobs:
           fi
 
           ls -lh "output/${APK_NAME}.apk"
-
           echo "APK siap diunduh."
 
-      # 13. Upload Artifact
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
