@@ -59,46 +59,56 @@ jobs:
 
           unzip -o uploads/latest_project.zip -d extracted_temp/
 
-          echo "📁 Extracted contents:"
-          find extracted_temp -maxdepth 3 -type f | head -100
+          echo "📁 Isi ZIP:"
+          find extracted_temp -maxdepth 4 -type f | head -150
+
+          # Cari dan salin generate_icons.py SEBELUM folder Android dipindahkan
+          echo "🔎 Mencari generate_icons.py..."
+
+          ICON_SCRIPT=$(find extracted_temp -type f -name "generate_icons.py" | head -1)
+
+          if [ -n "$ICON_SCRIPT" ]; then
+            cp "$ICON_SCRIPT" ./generate_icons.py
+            echo "✅ Generator ditemukan: $ICON_SCRIPT"
+          else
+            echo "❌ generate_icons.py tidak ditemukan dalam ZIP!"
+            exit 1
+          fi
+
+          # Salin semua file JPG dan JPEG
+          echo "🔎 Mencari seluruh gambar JPG/JPEG..."
+
+          find extracted_temp -type f \( -iname "*.jpg" -o -iname "*.jpeg" \) -print0 |
+          while IFS= read -r -d '' f; do
+            cp "$f" "./$(basename "$f")"
+            echo "✅ Image copied: $(basename "$f")"
+          done
 
           # Cari folder Android berdasarkan gradlew
+          echo "🔎 Mencari Gradle project..."
+
           GRADLEW_PATH=$(find extracted_temp -type f -name "gradlew" | head -1)
 
           if [ -z "$GRADLEW_PATH" ]; then
-            echo "❌ No gradlew found in ZIP!"
+            echo "❌ gradlew tidak ditemukan!"
             exit 1
           fi
 
           PROJECT_DIR=$(dirname "$GRADLEW_PATH")
 
-          echo "📁 Android project found: $PROJECT_DIR"
+          echo "📁 Android project: $PROJECT_DIR"
 
           mv "$PROJECT_DIR" android
 
-          # Salin script generator dari ZIP
-          ICON_SCRIPT=$(find extracted_temp -type f -name "generate_icons.py" | head -1)
-
-          if [ -n "$ICON_SCRIPT" ]; then
-            cp "$ICON_SCRIPT" ./generate_icons.py
-            echo "✅ generate_icons.py copied"
-          else
-            echo "⚠️ generate_icons.py tidak ditemukan di ZIP"
-          fi
-
-          # Salin seluruh JPG/JPEG dari ZIP ke root
-          find extracted_temp -type f \( -iname "*.jpg" -o -iname "*.jpeg" \) | while read -r f; do
-            cp "$f" "./$(basename "$f")"
-            echo "✅ Image copied: $(basename "$f")"
-          done
-
           rm -rf extracted_temp
 
-          echo "📁 Root files:"
-          ls -lah *.jpg *.jpeg generate_icons.py 2>/dev/null || true
+          echo "📁 Generator:"
+          ls -lah generate_icons.py
 
-          echo "📁 Final project structure:"
-          ls -la
+          echo "📁 Gambar:"
+          ls -lah *.jpg *.jpeg 2>/dev/null || true
+
+          echo "✅ ZIP extraction selesai"
 
       - name: Fix Gradle Wrapper
         run: |
@@ -176,7 +186,8 @@ jobs:
 
           RES="android/app/src/main/res"
 
-          # Hapus adaptive icon XML yang konflik
+          echo "🧹 Membersihkan adaptive icon XML..."
+
           find "$RES" -type f -path "*/mipmap*/*.xml" -delete 2>/dev/null || true
           find "$RES"/drawable* -type f -name "ic_launcher*" -delete 2>/dev/null || true
           find "$RES"/values* -type f -name "ic_launcher*" -delete 2>/dev/null || true
@@ -184,14 +195,16 @@ jobs:
           rm -f "$RES/drawable/ic_launcher_background.xml" 2>/dev/null || true
           rm -f "$RES/drawable/ic_launcher_foreground.xml" 2>/dev/null || true
 
-          echo "📁 Files di root:"
-          ls -lah *.jpg *.jpeg *.py 2>/dev/null || true
+          echo "📁 Memeriksa generator..."
 
-          if [ -f "generate_icons.py" ]; then
-            echo "🎨 Running generate_icons.py..."
+          if [ ! -f "generate_icons.py" ]; then
+            echo "❌ generate_icons.py tidak ditemukan!"
+            exit 1
+          fi
 
-            # Pastikan semua file gambar tersedia
-            python3 - << 'PYEOF'
+          echo "🔎 Memeriksa 31 file JPG..."
+
+          python3 - << 'PYEOF'
           import os
 
           files = [
@@ -237,120 +250,75 @@ jobs:
                   print(f"❌ tidak ditemukan: {file}")
                   missing.append(file)
 
+          print(f"\n📊 Ditemukan: {len(files) - len(missing)}/31")
+
           if missing:
-              print(f"\n⚠️ Total gambar tidak ditemukan: {len(missing)}")
-          else:
-              print("\n✅ Semua 31 gambar ditemukan")
+              print("\n❌ Gambar berikut belum ditemukan:")
+              for file in missing:
+                  print(f" - {file}")
+              raise SystemExit(1)
+
+          print("\n✅ Semua gambar tersedia")
           PYEOF
 
-            python3 generate_icons.py
+          echo "🎨 Menjalankan generator asli..."
+          python3 generate_icons.py
 
-          else
-            echo "⚠️ generate_icons.py tidak ditemukan, generate placeholder..."
+          echo "🔎 Memverifikasi hasil ikon..."
 
-            python3 - << 'PYEOF'
-          from PIL import Image
-          import os
+          for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
+            DIR="$RES/mipmap-$density"
 
-          sizes = {
-              'mipmap-mdpi': 48,
-              'mipmap-hdpi': 72,
-              'mipmap-xhdpi': 96,
-              'mipmap-xxhdpi': 144,
-              'mipmap-xxxhdpi': 192
-          }
+            if [ ! -d "$DIR" ]; then
+              echo "❌ Folder $DIR tidak ditemukan!"
+              exit 1
+            fi
 
-          icons = [
-              'ic_launcher',
-              'ic_launcher_round',
-              'ic_theme_whatsapp',
-              'ic_theme_youtube',
-              'ic_theme_instagram',
-              'ic_theme_telegram',
-              'ic_theme_xnxx',
-              'ic_theme_spotify',
-              'ic_theme_melolo',
-              'ic_theme_canva',
-              'ic_theme_capcut',
-              'ic_theme_facebook',
-              'ic_theme_shopee',
-              'ic_theme_line',
-              'ic_theme_alibaba',
-              'ic_theme_tokopedia',
-              'ic_theme_grab',
-              'ic_theme_wps',
-              'ic_theme_wechat',
-              'ic_theme_ml',
-              'ic_theme_ff',
-              'ic_theme_mechat',
-              'ic_theme_omi',
-              'ic_theme_snackvideo',
-              'ic_theme_messages',
-              'ic_theme_dana',
-              'ic_theme_bcaimobile',
-              'ic_theme_livin',
-              'ic_theme_gopay',
-              'ic_theme_brimo',
-              'ic_theme_photos',
-              'ic_theme_seabank',
-              'ic_theme_gmail'
-          ]
+            for icon in \
+              ic_launcher \
+              ic_launcher_round \
+              ic_theme_whatsapp \
+              ic_theme_youtube \
+              ic_theme_instagram \
+              ic_theme_telegram \
+              ic_theme_xnxx \
+              ic_theme_spotify \
+              ic_theme_melolo \
+              ic_theme_canva \
+              ic_theme_capcut \
+              ic_theme_facebook \
+              ic_theme_shopee \
+              ic_theme_line \
+              ic_theme_alibaba \
+              ic_theme_tokopedia \
+              ic_theme_grab \
+              ic_theme_wps \
+              ic_theme_wechat \
+              ic_theme_ml \
+              ic_theme_ff \
+              ic_theme_mechat \
+              ic_theme_omi \
+              ic_theme_snackvideo \
+              ic_theme_messages \
+              ic_theme_dana \
+              ic_theme_bcaimobile \
+              ic_theme_livin \
+              ic_theme_gopay \
+              ic_theme_brimo \
+              ic_theme_photos \
+              ic_theme_seabank \
+              ic_theme_gmail
+            do
+              if [ ! -f "$DIR/$icon.png" ]; then
+                echo "❌ Ikon tidak ditemukan: $DIR/$icon.png"
+                exit 1
+              fi
+            done
 
-          colors = {
-              'ic_launcher': (66, 133, 244),
-              'ic_launcher_round': (66, 133, 244),
-              'ic_theme_whatsapp': (37, 211, 102),
-              'ic_theme_youtube': (255, 0, 0),
-              'ic_theme_instagram': (225, 48, 108),
-              'ic_theme_telegram': (0, 136, 204),
-              'ic_theme_xnxx': (255, 0, 0),
-              'ic_theme_spotify': (30, 215, 96),
-              'ic_theme_melolo': (255, 100, 100),
-              'ic_theme_canva': (0, 196, 204),
-              'ic_theme_capcut': (20, 20, 20),
-              'ic_theme_facebook': (24, 119, 242),
-              'ic_theme_shopee': (238, 77, 45),
-              'ic_theme_line': (0, 195, 0),
-              'ic_theme_alibaba': (255, 106, 0),
-              'ic_theme_tokopedia': (66, 181, 73),
-              'ic_theme_grab': (0, 177, 79),
-              'ic_theme_wps': (36, 120, 210),
-              'ic_theme_wechat': (9, 184, 62),
-              'ic_theme_ml': (30, 100, 220),
-              'ic_theme_ff': (255, 160, 0),
-              'ic_theme_mechat': (255, 100, 150),
-              'ic_theme_omi': (100, 100, 255),
-              'ic_theme_snackvideo': (255, 180, 0),
-              'ic_theme_messages': (50, 150, 255),
-              'ic_theme_dana': (0, 120, 255),
-              'ic_theme_bcaimobile': (0, 80, 180),
-              'ic_theme_livin': (255, 200, 0),
-              'ic_theme_gopay': (0, 150, 255),
-              'ic_theme_brimo': (0, 100, 200),
-              'ic_theme_photos': (100, 150, 255),
-              'ic_theme_seabank': (255, 100, 50),
-              'ic_theme_gmail': (234, 67, 53)
-          }
+            echo "✅ $density selesai: 33 ikon"
+          done
 
-          for folder, size in sizes.items():
-              path = f'android/app/src/main/res/{folder}'
-              os.makedirs(path, exist_ok=True)
-
-              for icon in icons:
-                  img = Image.new(
-                      'RGBA',
-                      (size, size),
-                      colors.get(icon, (100, 100, 100))
-                  )
-
-                  img.save(
-                      f'{path}/{icon}.png',
-                      format='PNG'
-                  )
-
-          print("✅ 33 fallback icons generated")
-          PYEOF
-          fi
+          echo "✅ Semua ikon berhasil dibuat"
 
       - name: Build APK
         run: |
