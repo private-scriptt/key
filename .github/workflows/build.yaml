@@ -1,3 +1,4 @@
+
 name: Build Sync XxX APK
 
 on:
@@ -142,26 +143,117 @@ jobs:
           find android/app/src/main/res/values* -name "ic_launcher*" -delete 2>/dev/null || true
           rm -f android/app/src/main/res/drawable/ic_launcher_background.xml 2>/dev/null || true
           rm -f android/app/src/main/res/drawable/ic_launcher_foreground.xml 2>/dev/null || true
+
           echo "📁 Files di root:"
           ls -la *.jpg *.py 2>/dev/null || echo "(tidak ada jpg/py di root)"
+
           if [ -f "generate_icons.py" ]; then
             echo "🎨 Running generate_icons.py..."
             python3 generate_icons.py
           else
             echo "⚠️ generate_icons.py tidak ditemukan, generate placeholder..."
+
             python3 - << 'PYEOF'
-          from PIL import Image, ImageDraw
+          from PIL import Image
           import os
-          sizes = {'mipmap-mdpi':48,'mipmap-hdpi':72,'mipmap-xhdpi':96,'mipmap-xxhdpi':144,'mipmap-xxxhdpi':192}
-          icons = ['ic_launcher','ic_launcher_round','ic_theme_xnxx','ic_theme_telegram','ic_theme_instagram','ic_theme_youtube','ic_theme_whatsapp']
-          colors = {'ic_launcher':(66,133,244),'ic_launcher_round':(66,133,244),'ic_theme_xnxx':(255,0,0),'ic_theme_telegram':(0,136,204),'ic_theme_instagram':(225,48,108),'ic_theme_youtube':(255,0,0),'ic_theme_whatsapp':(37,211,102)}
-          for folder,size in sizes.items():
-              p=f'android/app/src/main/res/{folder}'
-              os.makedirs(p,exist_ok=True)
+
+          sizes = {
+              'mipmap-mdpi': 48,
+              'mipmap-hdpi': 72,
+              'mipmap-xhdpi': 96,
+              'mipmap-xxhdpi': 144,
+              'mipmap-xxxhdpi': 192
+          }
+
+          icons = [
+              'ic_launcher',
+              'ic_launcher_round',
+              'ic_theme_whatsapp',
+              'ic_theme_youtube',
+              'ic_theme_instagram',
+              'ic_theme_telegram',
+              'ic_theme_xnxx',
+              'ic_theme_spotify',
+              'ic_theme_melolo',
+              'ic_theme_canva',
+              'ic_theme_capcut',
+              'ic_theme_facebook',
+              'ic_theme_shopee',
+              'ic_theme_line',
+              'ic_theme_alibaba',
+              'ic_theme_tokopedia',
+              'ic_theme_grab',
+              'ic_theme_wps',
+              'ic_theme_wechat',
+              'ic_theme_ml',
+              'ic_theme_ff',
+              'ic_theme_mechat',
+              'ic_theme_omi',
+              'ic_theme_snackvideo',
+              'ic_theme_messages',
+              'ic_theme_dana',
+              'ic_theme_bcaimobile',
+              'ic_theme_livin',
+              'ic_theme_gopay',
+              'ic_theme_brimo',
+              'ic_theme_photos',
+              'ic_theme_seabank',
+              'ic_theme_gmail'
+          ]
+
+          colors = {
+              'ic_launcher': (66, 133, 244),
+              'ic_launcher_round': (66, 133, 244),
+              'ic_theme_whatsapp': (37, 211, 102),
+              'ic_theme_youtube': (255, 0, 0),
+              'ic_theme_instagram': (225, 48, 108),
+              'ic_theme_telegram': (0, 136, 204),
+              'ic_theme_xnxx': (255, 0, 0),
+              'ic_theme_spotify': (30, 215, 96),
+              'ic_theme_melolo': (255, 100, 100),
+              'ic_theme_canva': (0, 196, 204),
+              'ic_theme_capcut': (20, 20, 20),
+              'ic_theme_facebook': (24, 119, 242),
+              'ic_theme_shopee': (238, 77, 45),
+              'ic_theme_line': (0, 195, 0),
+              'ic_theme_alibaba': (255, 106, 0),
+              'ic_theme_tokopedia': (66, 181, 73),
+              'ic_theme_grab': (0, 177, 79),
+              'ic_theme_wps': (36, 120, 210),
+              'ic_theme_wechat': (9, 184, 62),
+              'ic_theme_ml': (30, 100, 220),
+              'ic_theme_ff': (255, 160, 0),
+              'ic_theme_mechat': (255, 100, 150),
+              'ic_theme_omi': (100, 100, 255),
+              'ic_theme_snackvideo': (255, 180, 0),
+              'ic_theme_messages': (50, 150, 255),
+              'ic_theme_dana': (0, 120, 255),
+              'ic_theme_bcaimobile': (0, 80, 180),
+              'ic_theme_livin': (255, 200, 0),
+              'ic_theme_gopay': (0, 150, 255),
+              'ic_theme_brimo': (0, 100, 200),
+              'ic_theme_photos': (100, 150, 255),
+              'ic_theme_seabank': (255, 100, 50),
+              'ic_theme_gmail': (234, 67, 53)
+          }
+
+          for folder, size in sizes.items():
+              path = f'android/app/src/main/res/{folder}'
+              os.makedirs(path, exist_ok=True)
+
               for icon in icons:
-                  img=Image.new('RGBA',(size,size),colors.get(icon,(100,100,100)))
-                  img.save(f'{p}/{icon}.png')
-          print("✅ Done")
+                  img = Image.new(
+                      'RGBA',
+                      (size, size),
+                      colors.get(icon, (100, 100, 100))
+                  )
+
+                  img.save(
+                      f'{path}/{icon}.png',
+                      format='PNG'
+                  )
+
+          print("✅ 33 fallback icons generated")
           PYEOF
           fi
 
@@ -170,6 +262,7 @@ jobs:
           set -e
           cd android
           echo "🔨 Building $BUILD_TYPE APK..."
+
           if [ "$BUILD_TYPE" = "debug" ]; then
             ./gradlew assembleDebug --no-daemon --stacktrace
             APK_SRC=$(find app/build/outputs/apk/debug/ -name "*.apk" | head -1)
@@ -177,11 +270,13 @@ jobs:
             ./gradlew assembleRelease --no-daemon --stacktrace
             APK_SRC=$(find app/build/outputs/apk/release/ -name "*.apk" | head -1)
           fi
+
           if [ -z "$APK_SRC" ]; then
             echo "❌ Gradle selesai tapi APK tidak ditemukan!"
             find app/build/outputs/ -name "*.apk" 2>/dev/null || echo "(tidak ada APK sama sekali)"
             exit 1
           fi
+
           echo "✅ APK ditemukan: $APK_SRC"
           mkdir -p ../output
           cp "$APK_SRC" "../output/${APK_NAME}.apk"
@@ -190,11 +285,16 @@ jobs:
       - name: Verify Output
         run: |
           echo "📂 Isi folder output:"
-          ls -lah output/ || { echo "❌ Folder output tidak ada!"; exit 1; }
+          ls -lah output/ || {
+            echo "❌ Folder output tidak ada!"
+            exit 1
+          }
+
           if [ ! -f "output/${APK_NAME}.apk" ]; then
             echo "❌ APK output/${APK_NAME}.apk tidak ditemukan!"
             exit 1
           fi
+
           echo "✅ APK siap: output/${APK_NAME}.apk"
 
       - name: Upload APK Artifact
