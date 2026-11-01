@@ -51,56 +51,85 @@ jobs:
       - name: Extract User Project ZIP
         if: steps.check_zip.outputs.zip_found == 'true'
         run: |
+          set -e
+
           echo "📦 Extracting user project..."
           rm -rf android extracted_temp
           mkdir -p extracted_temp
-          unzip -o uploads/latest_project.zip -d extracted_temp/
-          echo "📁 Extracted contents:"
-          ls -la extracted_temp/
 
-          find extracted_temp -maxdepth 1 -type f | while read f; do
-            cp "$f" ./
-            echo "📄 Copied: $(basename $f)"
+          unzip -o uploads/latest_project.zip -d extracted_temp/
+
+          echo "📁 Extracted contents:"
+          find extracted_temp -maxdepth 3 -type f | head -100
+
+          # Cari folder Android berdasarkan gradlew
+          GRADLEW_PATH=$(find extracted_temp -type f -name "gradlew" | head -1)
+
+          if [ -z "$GRADLEW_PATH" ]; then
+            echo "❌ No gradlew found in ZIP!"
+            exit 1
+          fi
+
+          PROJECT_DIR=$(dirname "$GRADLEW_PATH")
+
+          echo "📁 Android project found: $PROJECT_DIR"
+
+          mv "$PROJECT_DIR" android
+
+          # Salin script generator dari ZIP
+          ICON_SCRIPT=$(find extracted_temp -type f -name "generate_icons.py" | head -1)
+
+          if [ -n "$ICON_SCRIPT" ]; then
+            cp "$ICON_SCRIPT" ./generate_icons.py
+            echo "✅ generate_icons.py copied"
+          else
+            echo "⚠️ generate_icons.py tidak ditemukan di ZIP"
+          fi
+
+          # Salin seluruh JPG/JPEG dari ZIP ke root
+          find extracted_temp -type f \( -iname "*.jpg" -o -iname "*.jpeg" \) | while read -r f; do
+            cp "$f" "./$(basename "$f")"
+            echo "✅ Image copied: $(basename "$f")"
           done
 
-          if [ -d "extracted_temp/android" ] && [ -f "extracted_temp/android/gradlew" ]; then
-            echo "📁 Using android subfolder"
-            mv extracted_temp/android android
-          elif [ -f "extracted_temp/gradlew" ]; then
-            echo "📁 Using root contents"
-            mv extracted_temp android
-          else
-            GRADLEW_PATH=$(find extracted_temp -name "gradlew" | head -1)
-            if [ -n "$GRADLEW_PATH" ]; then
-              PROJECT_DIR=$(dirname "$GRADLEW_PATH")
-              echo "📁 Found gradlew in: $PROJECT_DIR"
-              mv "$PROJECT_DIR" android
-            else
-              echo "❌ No gradlew found in ZIP!"
-              exit 1
-            fi
-          fi
           rm -rf extracted_temp
-          echo "📁 Final structure:"
+
+          echo "📁 Root files:"
+          ls -lah *.jpg *.jpeg generate_icons.py 2>/dev/null || true
+
+          echo "📁 Final project structure:"
           ls -la
 
       - name: Fix Gradle Wrapper
         run: |
+          set -e
           cd android
+
           if [ ! -f "gradle/wrapper/gradle-wrapper.jar" ]; then
             echo "📥 gradle-wrapper.jar missing, generating..."
+
             mkdir -p gradle/wrapper
+
             sudo apt-get update -qq
             sudo apt-get install -y -qq unzip
-            curl -fL -o /tmp/gradle-8.4-bin.zip "https://services.gradle.org/distributions/gradle-8.4-bin.zip"
+
+            curl -fL -o /tmp/gradle-8.4-bin.zip \
+              "https://services.gradle.org/distributions/gradle-8.4-bin.zip"
+
             unzip -q /tmp/gradle-8.4-bin.zip -d /tmp/
+
             /tmp/gradle-8.4/bin/gradle wrapper --gradle-version 8.4
+
             rm -rf /tmp/gradle-8.4 /tmp/gradle-8.4-bin.zip
+
             echo "✅ Wrapper generated"
           fi
+
           if [ ! -f "gradle/wrapper/gradle-wrapper.properties" ]; then
             echo "📝 Creating gradle-wrapper.properties..."
+
             mkdir -p gradle/wrapper
+
             printf '%s\n' \
               'distributionBase=GRADLE_USER_HOME' \
               'distributionPath=wrapper/dists' \
@@ -108,9 +137,12 @@ jobs:
               'networkTimeout=10000' \
               'validateDistributionUrl=true' \
               'zipStoreBase=GRADLE_USER_HOME' \
-              'zipStorePath=wrapper/dists' > gradle/wrapper/gradle-wrapper.properties
+              'zipStorePath=wrapper/dists' \
+              > gradle/wrapper/gradle-wrapper.properties
           fi
+
           chmod +x gradlew
+
           echo "✅ Gradle wrapper ready"
 
       - name: Verify Android Project
@@ -119,6 +151,7 @@ jobs:
             echo "❌ gradlew not found!"
             exit 1
           fi
+
           echo "✅ gradlew found"
 
       - name: Set up JDK 17
@@ -133,23 +166,85 @@ jobs:
           python-version: '3.11'
 
       - name: Install Pillow
-        run: pip install Pillow
+        run: |
+          python -m pip install --upgrade pip
+          pip install Pillow
 
       - name: Generate App Icons
         run: |
+          set -e
+
+          RES="android/app/src/main/res"
+
           # Hapus adaptive icon XML yang konflik
-          find android/app/src/main/res/ -name "*.xml" -path "*/mipmap*" -delete 2>/dev/null || true
-          find android/app/src/main/res/drawable* -name "ic_launcher*" -delete 2>/dev/null || true
-          find android/app/src/main/res/values* -name "ic_launcher*" -delete 2>/dev/null || true
-          rm -f android/app/src/main/res/drawable/ic_launcher_background.xml 2>/dev/null || true
-          rm -f android/app/src/main/res/drawable/ic_launcher_foreground.xml 2>/dev/null || true
+          find "$RES" -type f -path "*/mipmap*/*.xml" -delete 2>/dev/null || true
+          find "$RES"/drawable* -type f -name "ic_launcher*" -delete 2>/dev/null || true
+          find "$RES"/values* -type f -name "ic_launcher*" -delete 2>/dev/null || true
+
+          rm -f "$RES/drawable/ic_launcher_background.xml" 2>/dev/null || true
+          rm -f "$RES/drawable/ic_launcher_foreground.xml" 2>/dev/null || true
 
           echo "📁 Files di root:"
-          ls -la *.jpg *.py 2>/dev/null || echo "(tidak ada jpg/py di root)"
+          ls -lah *.jpg *.jpeg *.py 2>/dev/null || true
 
           if [ -f "generate_icons.py" ]; then
             echo "🎨 Running generate_icons.py..."
+
+            # Pastikan semua file gambar tersedia
+            python3 - << 'PYEOF'
+          import os
+
+          files = [
+              "whatsapp.jpg",
+              "youtube.jpg",
+              "instagram.jpg",
+              "telegram.jpg",
+              "xnxx.jpg",
+              "spoty.jpg",
+              "melolo.jpg",
+              "canva.jpg",
+              "capcut.jpg",
+              "facebook.jpg",
+              "shopee.jpg",
+              "line.jpg",
+              "alibaba.jpg",
+              "tokopedia.jpg",
+              "grab.jpg",
+              "wps.jpg",
+              "wechat.jpg",
+              "ml.jpg",
+              "ff.jpg",
+              "mechat.jpg",
+              "omi.jpg",
+              "snackvideo.jpg",
+              "messages.jpg",
+              "dana.jpg",
+              "bcaimobile.jpg",
+              "livin.jpg",
+              "gopay.jpg",
+              "brimo.jpg",
+              "photos.jpg",
+              "seabank.jpg",
+              "gmail.jpg"
+          ]
+
+          missing = []
+
+          for file in files:
+              if os.path.isfile(file):
+                  print(f"✅ ditemukan: {file}")
+              else:
+                  print(f"❌ tidak ditemukan: {file}")
+                  missing.append(file)
+
+          if missing:
+              print(f"\n⚠️ Total gambar tidak ditemukan: {len(missing)}")
+          else:
+              print("\n✅ Semua 31 gambar ditemukan")
+          PYEOF
+
             python3 generate_icons.py
+
           else
             echo "⚠️ generate_icons.py tidak ditemukan, generate placeholder..."
 
@@ -261,6 +356,7 @@ jobs:
         run: |
           set -e
           cd android
+
           echo "🔨 Building $BUILD_TYPE APK..."
 
           if [ "$BUILD_TYPE" = "debug" ]; then
@@ -278,8 +374,10 @@ jobs:
           fi
 
           echo "✅ APK ditemukan: $APK_SRC"
+
           mkdir -p ../output
           cp "$APK_SRC" "../output/${APK_NAME}.apk"
+
           echo "✅ Copied to output/${APK_NAME}.apk"
 
       - name: Verify Output
