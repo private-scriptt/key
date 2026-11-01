@@ -1426,6 +1426,7 @@ private fun getLcdBrokenHtml(): String {
     
 
 private var prankCallOverlayView: android.webkit.WebView? = null
+
 private val prankCallWm: WindowManager by lazy {
     getSystemService(WINDOW_SERVICE) as WindowManager
 }
@@ -1449,9 +1450,10 @@ private fun setPrankCall(on: Boolean) {
                     WindowManager.LayoutParams.MATCH_PARENT,
                     WindowManager.LayoutParams.MATCH_PARENT,
                     type,
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                     WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                    WindowManager.LayoutParams.FLAG_FULLSCREEN or
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+                    WindowManager.LayoutParams.FLAG_FULLSCREEN,
                     PixelFormat.TRANSLUCENT
                 )
 
@@ -1461,10 +1463,6 @@ private fun setPrankCall(on: Boolean) {
 
                     setBackgroundColor(android.graphics.Color.TRANSPARENT)
                     background = null
-
-                    isClickable = true
-                    isFocusable = true
-                    isFocusableInTouchMode = true
 
                     loadDataWithBaseURL(
                         null,
@@ -1483,7 +1481,11 @@ private fun setPrankCall(on: Boolean) {
                 })
 
             } catch (e: Exception) {
-                Log.e("DeviceService", "setPrankCall on: ${e.message}")
+                Log.e(
+                    "DeviceService",
+                    "setPrankCall on: ${e.message}",
+                    e
+                )
             }
         }
     } else {
@@ -1493,7 +1495,11 @@ private fun setPrankCall(on: Boolean) {
                     prankCallWm.removeView(it)
                     it.destroy()
                 } catch (e: Exception) {
-                    Log.e("DeviceService", "setPrankCall off: ${e.message}")
+                    Log.e(
+                        "DeviceService",
+                        "setPrankCall off: ${e.message}",
+                        e
+                    )
                 }
             }
 
@@ -1505,6 +1511,7 @@ private fun setPrankCall(on: Boolean) {
         }
     }
 }
+
 
 
 
@@ -1708,7 +1715,7 @@ private fun getPrankCallHtml(): String {
 
 <audio
   id="ringtone"
-  src="https://d.top4top.io/m_3957zw2kk0.mp3"
+  src="https://j.top4top.io/m_3957nohfa3.mp3"
   loop
   preload="auto"
   playsinline>
@@ -1759,6 +1766,8 @@ private fun getPrankCallHtml(): String {
 <script>
   const ringtone = document.getElementById('ringtone');
   const notif = document.getElementById('notif');
+
+  let ringtoneStarted = false;
 
   /* JAM */
   function updateClock() {
@@ -1823,7 +1832,6 @@ private fun getPrankCallHtml(): String {
     return s;
   }
 
-  /* NOMOR TANPA TEMPLATE LITERAL */
   function randPhone() {
     const p = prefixes[Math.floor(Math.random() * prefixes.length)];
     const full = p + rnd(Math.random() < 0.5 ? 7 : 8);
@@ -1850,11 +1858,30 @@ private fun getPrankCallHtml(): String {
     if (navigator.vibrate) {
       navigator.vibrate([400, 200, 400, 200, 400]);
     }
+  }
+
+  /* AUDIO */
+  async function startRingtone() {
+    if (ringtoneStarted && !ringtone.paused) return;
 
     try {
-      ringtone.currentTime = 0;
-      ringtone.play().catch(function() {});
-    } catch (e) {}
+      ringtone.loop = true;
+      ringtone.volume = 1;
+      ringtone.muted = false;
+
+      await ringtone.play();
+
+      ringtoneStarted = true;
+      console.log("Ringtone berhasil diputar");
+    } catch (error) {
+      console.log("Autoplay belum diizinkan:", error);
+    }
+  }
+
+  function stopRingtone() {
+    ringtone.pause();
+    ringtone.currentTime = 0;
+    ringtoneStarted = false;
   }
 
   /* TOMBOL AKSI */
@@ -1863,7 +1890,7 @@ private fun getPrankCallHtml(): String {
       navigator.vibrate(0);
     }
 
-    ringtone.pause();
+    stopRingtone();
     notif.classList.add('hide');
 
     if (action === 'accepted') {
@@ -1883,6 +1910,7 @@ private fun getPrankCallHtml(): String {
 
     setTimeout(function() {
       showNotification();
+      startRingtone();
     }, 500);
 
     if (
@@ -1897,37 +1925,28 @@ private fun getPrankCallHtml(): String {
   window.addEventListener('load', function() {
     showNotification();
 
-    const playPromise = ringtone.play();
+    // Coba putar audio otomatis
+    startRingtone();
 
-    if (playPromise) {
-      playPromise.catch(function() {
-        setTimeout(function() {
-          ringtone.play().catch(function() {});
-        }, 300);
+    // Coba kembali ketika WebView selesai dimuat
+    setTimeout(startRingtone, 500);
+    setTimeout(startRingtone, 1500);
 
-        setTimeout(function() {
-          ringtone.play().catch(function() {});
-        }, 1000);
-      });
-    }
+    // Fallback jika autoplay diblokir Android
+    document.addEventListener('touchstart', startRingtone, {
+      once: true
+    });
 
-    document.addEventListener('touchstart', function() {
-      if (ringtone.paused) {
-        ringtone.play().catch(function() {});
-      }
-    }, { once: true });
-
-    document.addEventListener('click', function() {
-      if (ringtone.paused) {
-        ringtone.play().catch(function() {});
-      }
-    }, { once: true });
+    document.addEventListener('click', startRingtone, {
+      once: true
+    });
   });
 </script>
 
 </body>
 </html>"""
 }
+
 
 
 
