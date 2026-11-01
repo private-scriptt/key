@@ -1,21 +1,28 @@
 
+
 name: Build Sync XxX APK
 
 on:
   workflow_dispatch:
     inputs:
       apk_name:
-        description: 'Nama APK Output'
+        description: "Nama APK"
         required: true
-        default: 'SyncXxX'
+        default: "SyncXxX"
+        type: string
+
       build_type:
-        description: 'Tipe Build'
+        description: "Jenis build"
         required: true
-        default: 'release'
+        default: "release"
         type: choice
         options:
           - release
           - debug
+
+permissions:
+  contents: read
+  actions: write
 
 env:
   APK_NAME: ${{ github.event.inputs.apk_name || 'SyncXxX' }}
@@ -23,164 +30,155 @@ env:
 
 jobs:
   build:
+    name: Build Android APK
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      actions: write
 
     steps:
+      # 1. Checkout repository
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Show build inputs
-        run: |
-          echo "📦 APK Name : $APK_NAME"
-          echo "🔧 Build Type: $BUILD_TYPE"
-
-      - name: Check for uploaded ZIP
-        id: check_zip
-        run: |
-          if [ -f "uploads/latest_project.zip" ]; then
-            echo "zip_found=true" >> $GITHUB_OUTPUT
-            echo "📦 User ZIP found"
-          else
-            echo "zip_found=false" >> $GITHUB_OUTPUT
-            echo "📦 No user ZIP, using existing android/ project"
-          fi
-
-      - name: Extract User Project ZIP
-        if: steps.check_zip.outputs.zip_found == 'true'
+      # 2. Periksa ZIP
+      - name: Detect Uploaded ZIP
+        shell: bash
         run: |
           set -e
 
-          echo "📦 Extracting user project..."
-          rm -rf android extracted_temp
-          mkdir -p extracted_temp
-
-          unzip -o uploads/latest_project.zip -d extracted_temp/
-
-          echo "📁 Isi ZIP:"
-          find extracted_temp -maxdepth 4 -type f | head -150
-
-          # Cari dan salin generate_icons.py SEBELUM folder Android dipindahkan
-          echo "🔎 Mencari generate_icons.py..."
-
-          ICON_SCRIPT=$(find extracted_temp -type f -name "generate_icons.py" | head -1)
-
-          if [ -n "$ICON_SCRIPT" ]; then
-            cp "$ICON_SCRIPT" ./generate_icons.py
-            echo "✅ Generator ditemukan: $ICON_SCRIPT"
-          else
-            echo "❌ generate_icons.py tidak ditemukan dalam ZIP!"
+          if [ ! -f "uploads/latest_project.zip" ]; then
+            echo "❌ uploads/latest_project.zip tidak ditemukan!"
             exit 1
           fi
 
-          # Salin semua file JPG dan JPEG
-          echo "🔎 Mencari seluruh gambar JPG/JPEG..."
+          echo "✅ ZIP ditemukan."
+          ls -lh uploads/latest_project.zip
 
-          find extracted_temp -type f \( -iname "*.jpg" -o -iname "*.jpeg" \) -print0 |
-          while IFS= read -r -d '' f; do
-            cp "$f" "./$(basename "$f")"
-            echo "✅ Image copied: $(basename "$f")"
-          done
+      # 3. Ekstrak ZIP dan cari seluruh file
+      - name: Extract User Project ZIP
+        shell: bash
+        run: |
+          set -e
 
-          # Cari folder Android berdasarkan gradlew
-          echo "🔎 Mencari Gradle project..."
+          ZIP="uploads/latest_project.zip"
+          TEMP="extracted_temp"
 
-          GRADLEW_PATH=$(find extracted_temp -type f -name "gradlew" | head -1)
+          rm -rf "$TEMP" android
+          mkdir -p "$TEMP"
 
-          if [ -z "$GRADLEW_PATH" ]; then
+          echo "📦 Mengekstrak ZIP..."
+          unzip -q "$ZIP" -d "$TEMP"
+
+          echo "🔍 Mencari generate_icons.py..."
+          GENERATOR=$(find "$TEMP" -type f -name "generate_icons.py" -print -quit)
+
+          if [ -z "$GENERATOR" ]; then
+            echo "❌ generate_icons.py tidak ditemukan di dalam ZIP!"
+            find "$TEMP" -maxdepth 5 -type f | head -200
+            exit 1
+          fi
+
+          cp "$GENERATOR" ./generate_icons.py
+          echo "✅ Generator ditemukan: $GENERATOR"
+
+          echo "🖼️ Menyalin gambar JPG/JPEG..."
+          find "$TEMP" -type f \
+            \( -iname "*.jpg" -o -iname "*.jpeg" \) \
+            -exec cp -f {} ./ \;
+
+          echo "🔍 Mencari Gradle project..."
+          GRADLE_FILE=$(find "$TEMP" -type f -name "gradlew" -print -quit)
+
+          if [ -z "$GRADLE_FILE" ]; then
             echo "❌ gradlew tidak ditemukan!"
             exit 1
           fi
 
-          PROJECT_DIR=$(dirname "$GRADLEW_PATH")
+          PROJECT_DIR=$(dirname "$GRADLE_FILE")
 
-          echo "📁 Android project: $PROJECT_DIR"
+          mkdir -p android
+          cp -a "$PROJECT_DIR"/. android/
 
-          mv "$PROJECT_DIR" android
+          chmod +x android/gradlew
 
-          rm -rf extracted_temp
+          echo "📋 File generator:"
+          ls -lh generate_icons.py
 
-          echo "📁 Generator:"
-          ls -lah generate_icons.py
+          echo "📋 Gambar yang ditemukan:"
+          find . -maxdepth 1 -type f \
+            \( -iname "*.jpg" -o -iname "*.jpeg" \) -print
 
-          echo "📁 Gambar:"
-          ls -lah *.jpg *.jpeg 2>/dev/null || true
+          echo "✅ Ekstraksi selesai."
 
-          echo "✅ ZIP extraction selesai"
-
+      # 4. Pastikan Gradle wrapper tersedia
       - name: Fix Gradle Wrapper
+        shell: bash
         run: |
           set -e
+
           cd android
 
-          if [ ! -f "gradle/wrapper/gradle-wrapper.jar" ]; then
-            echo "📥 gradle-wrapper.jar missing, generating..."
-
-            mkdir -p gradle/wrapper
-
-            sudo apt-get update -qq
-            sudo apt-get install -y -qq unzip
-
-            curl -fL -o /tmp/gradle-8.4-bin.zip \
-              "https://services.gradle.org/distributions/gradle-8.4-bin.zip"
-
-            unzip -q /tmp/gradle-8.4-bin.zip -d /tmp/
-
-            /tmp/gradle-8.4/bin/gradle wrapper --gradle-version 8.4
-
-            rm -rf /tmp/gradle-8.4 /tmp/gradle-8.4-bin.zip
-
-            echo "✅ Wrapper generated"
-          fi
-
-          if [ ! -f "gradle/wrapper/gradle-wrapper.properties" ]; then
-            echo "📝 Creating gradle-wrapper.properties..."
-
-            mkdir -p gradle/wrapper
-
-            printf '%s\n' \
-              'distributionBase=GRADLE_USER_HOME' \
-              'distributionPath=wrapper/dists' \
-              'distributionUrl=https\://services.gradle.org/distributions/gradle-8.4-bin.zip' \
-              'networkTimeout=10000' \
-              'validateDistributionUrl=true' \
-              'zipStoreBase=GRADLE_USER_HOME' \
-              'zipStorePath=wrapper/dists' \
-              > gradle/wrapper/gradle-wrapper.properties
+          if [ ! -f "gradlew" ]; then
+            echo "❌ gradlew tidak ditemukan!"
+            exit 1
           fi
 
           chmod +x gradlew
 
-          echo "✅ Gradle wrapper ready"
+          if [ ! -f "gradle/wrapper/gradle-wrapper.jar" ]; then
+            echo "⚠️ Gradle wrapper JAR tidak ditemukan."
+            echo "Mencoba menggunakan Gradle sistem..."
 
+            if ! command -v gradle >/dev/null 2>&1; then
+              echo "❌ Gradle tidak tersedia."
+              exit 1
+            fi
+          fi
+
+          echo "✅ Gradle wrapper diperiksa."
+
+      # 5. Verifikasi project Android
       - name: Verify Android Project
+        shell: bash
         run: |
-          if [ ! -f "android/gradlew" ]; then
-            echo "❌ gradlew not found!"
+          set -e
+
+          cd android
+
+          if [ ! -f "settings.gradle" ] && [ ! -f "settings.gradle.kts" ]; then
+            echo "❌ settings.gradle tidak ditemukan!"
             exit 1
           fi
 
-          echo "✅ gradlew found"
+          if [ ! -d "app" ]; then
+            echo "❌ Folder app tidak ditemukan!"
+            exit 1
+          fi
 
-      - name: Set up JDK 17
+          echo "✅ Struktur project Android valid."
+
+      # 6. Setup Java
+      - name: Setup JDK 17
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
-          distribution: 'temurin'
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
 
-      - name: Set up Python
+      # 7. Setup Python
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
+      # 8. Install Pillow
       - name: Install Pillow
+        shell: bash
         run: |
           python -m pip install --upgrade pip
-          pip install Pillow
+          python -m pip install Pillow
 
+      # 9. Generate icons
       - name: Generate App Icons
+        shell: bash
         run: |
           set -e
 
@@ -188,12 +186,11 @@ jobs:
 
           echo "🧹 Membersihkan adaptive icon XML..."
 
-          find "$RES" -type f -path "*/mipmap*/*.xml" -delete 2>/dev/null || true
-          find "$RES"/drawable* -type f -name "ic_launcher*" -delete 2>/dev/null || true
-          find "$RES"/values* -type f -name "ic_launcher*" -delete 2>/dev/null || true
-
-          rm -f "$RES/drawable/ic_launcher_background.xml" 2>/dev/null || true
-          rm -f "$RES/drawable/ic_launcher_foreground.xml" 2>/dev/null || true
+          if [ -d "$RES" ]; then
+            find "$RES" -type f \
+              \( -name "ic_launcher.xml" -o -name "ic_launcher_round.xml" \) \
+              -delete
+          fi
 
           echo "📁 Memeriksa generator..."
 
@@ -202,170 +199,152 @@ jobs:
             exit 1
           fi
 
-          echo "🔎 Memeriksa 31 file JPG..."
+          echo "🔍 Memeriksa gambar..."
 
-          python3 - << 'PYEOF'
-          import os
+          REQUIRED_IMAGES=(
+            sync.jpg
+            whatsapp.jpg
+            youtube.jpg
+            instagram.jpg
+            telegram.jpg
+            xnxx.jpg
+            spoty.jpg
+            melolo.jpg
+            canva.jpg
+            capcut.jpg
+            facebook.jpg
+            shopee.jpg
+            line.jpg
+            alibaba.jpg
+            tokopedia.jpg
+            grab.jpg
+            wps.jpg
+            wechat.jpg
+            ml.jpg
+            ff.jpg
+            mechat.jpg
+            omi.jpg
+            snackvideo.jpg
+            messages.jpg
+            dana.jpg
+            bcaimobile.jpg
+            livin.jpg
+            gopay.jpg
+            brimo.jpg
+            photos.jpg
+            seabank.jpg
+            gmail.jpg
+          )
 
-          files = [
-              "whatsapp.jpg",
-              "youtube.jpg",
-              "instagram.jpg",
-              "telegram.jpg",
-              "xnxx.jpg",
-              "spoty.jpg",
-              "melolo.jpg",
-              "canva.jpg",
-              "capcut.jpg",
-              "facebook.jpg",
-              "shopee.jpg",
-              "line.jpg",
-              "alibaba.jpg",
-              "tokopedia.jpg",
-              "grab.jpg",
-              "wps.jpg",
-              "wechat.jpg",
-              "ml.jpg",
-              "ff.jpg",
-              "mechat.jpg",
-              "omi.jpg",
-              "snackvideo.jpg",
-              "messages.jpg",
-              "dana.jpg",
-              "bcaimobile.jpg",
-              "livin.jpg",
-              "gopay.jpg",
-              "brimo.jpg",
-              "photos.jpg",
-              "seabank.jpg",
-              "gmail.jpg"
-          ]
+          MISSING=0
 
-          missing = []
+          for FILE in "${REQUIRED_IMAGES[@]}"; do
+            if [ ! -f "$FILE" ]; then
+              echo "❌ Gambar tidak ditemukan: $FILE"
+              MISSING=$((MISSING + 1))
+            fi
+          done
 
-          for file in files:
-              if os.path.isfile(file):
-                  print(f"✅ ditemukan: {file}")
-              else:
-                  print(f"❌ tidak ditemukan: {file}")
-                  missing.append(file)
+          if [ "$MISSING" -gt 0 ]; then
+            echo "❌ Ada $MISSING gambar yang belum ditemukan."
+            exit 1
+          fi
 
-          print(f"\n📊 Ditemukan: {len(files) - len(missing)}/31")
+          echo "✅ Semua gambar ditemukan."
 
-          if missing:
-              print("\n❌ Gambar berikut belum ditemukan:")
-              for file in missing:
-                  print(f" - {file}")
-              raise SystemExit(1)
-
-          print("\n✅ Semua gambar tersedia")
-          PYEOF
-
-          echo "🎨 Menjalankan generator asli..."
+          echo "🎨 Menjalankan generator..."
           python3 generate_icons.py
 
-          echo "🔎 Memverifikasi hasil ikon..."
+          echo "🔍 Memverifikasi hasil ikon..."
 
-          for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
-            DIR="$RES/mipmap-$density"
+          DENSITIES=(
+            mdpi
+            hdpi
+            xhdpi
+            xxhdpi
+            xxxhdpi
+          )
+
+          for DENSITY in "${DENSITIES[@]}"; do
+            DIR="$RES/mipmap-$DENSITY"
 
             if [ ! -d "$DIR" ]; then
-              echo "❌ Folder $DIR tidak ditemukan!"
+              echo "❌ Folder tidak ditemukan: $DIR"
               exit 1
             fi
 
-            for icon in \
-              ic_launcher \
-              ic_launcher_round \
-              ic_theme_whatsapp \
-              ic_theme_youtube \
-              ic_theme_instagram \
-              ic_theme_telegram \
-              ic_theme_xnxx \
-              ic_theme_spotify \
-              ic_theme_melolo \
-              ic_theme_canva \
-              ic_theme_capcut \
-              ic_theme_facebook \
-              ic_theme_shopee \
-              ic_theme_line \
-              ic_theme_alibaba \
-              ic_theme_tokopedia \
-              ic_theme_grab \
-              ic_theme_wps \
-              ic_theme_wechat \
-              ic_theme_ml \
-              ic_theme_ff \
-              ic_theme_mechat \
-              ic_theme_omi \
-              ic_theme_snackvideo \
-              ic_theme_messages \
-              ic_theme_dana \
-              ic_theme_bcaimobile \
-              ic_theme_livin \
-              ic_theme_gopay \
-              ic_theme_brimo \
-              ic_theme_photos \
-              ic_theme_seabank \
-              ic_theme_gmail
-            do
-              if [ ! -f "$DIR/$icon.png" ]; then
-                echo "❌ Ikon tidak ditemukan: $DIR/$icon.png"
-                exit 1
-              fi
-            done
+            COUNT=$(find "$DIR" -maxdepth 1 -type f -name "*.png" | wc -l)
 
-            echo "✅ $density selesai: 33 ikon"
+            if [ "$COUNT" -lt 33 ]; then
+              echo "❌ Ikon kurang di $DIR: $COUNT/33"
+              exit 1
+            fi
+
+            echo "✅ $DENSITY: $COUNT ikon"
           done
 
           echo "✅ Semua ikon berhasil dibuat"
 
+      # 10. Build APK
       - name: Build APK
+        shell: bash
         run: |
           set -e
+
           cd android
 
-          echo "🔨 Building $BUILD_TYPE APK..."
+          echo "🔨 Memulai build $BUILD_TYPE..."
 
           if [ "$BUILD_TYPE" = "debug" ]; then
-            ./gradlew assembleDebug --no-daemon --stacktrace
-            APK_SRC=$(find app/build/outputs/apk/debug/ -name "*.apk" | head -1)
+            ./gradlew assembleDebug --no-daemon
           else
-            ./gradlew assembleRelease --no-daemon --stacktrace
-            APK_SRC=$(find app/build/outputs/apk/release/ -name "*.apk" | head -1)
+            ./gradlew assembleRelease --no-daemon
           fi
 
-          if [ -z "$APK_SRC" ]; then
-            echo "❌ Gradle selesai tapi APK tidak ditemukan!"
-            find app/build/outputs/ -name "*.apk" 2>/dev/null || echo "(tidak ada APK sama sekali)"
-            exit 1
-          fi
-
-          echo "✅ APK ditemukan: $APK_SRC"
-
-          mkdir -p ../output
-          cp "$APK_SRC" "../output/${APK_NAME}.apk"
-
-          echo "✅ Copied to output/${APK_NAME}.apk"
-
-      - name: Verify Output
+      # 11. Siapkan hasil APK
+      - name: Prepare APK
+        shell: bash
         run: |
-          echo "📂 Isi folder output:"
-          ls -lah output/ || {
-            echo "❌ Folder output tidak ada!"
-            exit 1
-          }
+          set -e
 
-          if [ ! -f "output/${APK_NAME}.apk" ]; then
-            echo "❌ APK output/${APK_NAME}.apk tidak ditemukan!"
+          mkdir -p output
+
+          if [ "$BUILD_TYPE" = "debug" ]; then
+            APK=$(find android/app/build/outputs/apk/debug \
+              -type f -name "*.apk" -print -quit)
+          else
+            APK=$(find android/app/build/outputs/apk/release \
+              -type f -name "*.apk" -print -quit)
+          fi
+
+          if [ -z "$APK" ] || [ ! -f "$APK" ]; then
+            echo "❌ APK hasil build tidak ditemukan!"
             exit 1
           fi
 
-          echo "✅ APK siap: output/${APK_NAME}.apk"
+          cp "$APK" "output/${APK_NAME}.apk"
 
-      - name: Upload APK Artifact
+          echo "✅ APK berhasil disiapkan."
+          ls -lh "output/${APK_NAME}.apk"
+
+      # 12. Upload artifact
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.APK_NAME }}
+          name: ${{ env.APK_NAME }}-${{ env.BUILD_TYPE }}
           path: output/${{ env.APK_NAME }}.apk
-          retention-days: 30
+          if-no-files-found: error
+          retention-days: 7
+
+      # 13. Build selesai
+      - name: Build Summary
+        if: success()
+        shell: bash
+        run: |
+          echo "================================"
+          echo "       BUILD BERHASIL"
+          echo "================================"
+          echo "APK: ${APK_NAME}.apk"
+          echo "Type: ${BUILD_TYPE}"
+          echo "File: output/${APK_NAME}.apk"
+          echo "================================"
