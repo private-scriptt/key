@@ -971,294 +971,106 @@ private fun stopSpamWallpaper() {
     })
 }
 
-private var blackScreenOverlayView: android.webkit.WebView? = null
-private val blackScreenWm: WindowManager by lazy { getSystemService(WINDOW_SERVICE) as WindowManager }
-
-private fun setBlackScreen(on: Boolean) {
-    if (on) {
-        if (blackScreenOverlayView != null) return
-
-        val html = getPrankblackScreen()
-
-        Handler(Looper.getMainLooper()).post {
-            try {
-                val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                else
-                    @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_SYSTEM_ALERT
-
-                val params = WindowManager.LayoutParams(
-                    WindowManager.LayoutParams.MATCH_PARENT,
-                    WindowManager.LayoutParams.MATCH_PARENT,
-                    type,
-                    // Tembus sentuhan, tidak fokus, tutup seluruh layar termasuk status bar & nav bar.
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
-                    WindowManager.LayoutParams.FLAG_FULLSCREEN,
-                    // Opaque: panel hitam harus menutup total.
-                    android.graphics.PixelFormat.OPAQUE
-                )
-
-                val wv = android.webkit.WebView(this@DeviceService).apply {
-                    settings.javaScriptEnabled = true
-                    settings.domStorageEnabled = true
-                    settings.mediaPlaybackRequiresUserGesture = false
-                    setBackgroundColor(android.graphics.Color.BLACK)
-                    loadDataWithBaseURL("about:blank", html, "text/html", "UTF-8", null)
-                }
-
-                blackScreenOverlayView = wv
-                blackScreenWm.addView(wv, params)
-
-                emitStatus(JSONObject().apply { put("blackScreenActive", true) })
-            } catch (e: Exception) {
-                Log.e("DeviceService", "setBlackScreen on: ${e.message}", e)
-            }
-        }
-    } else {
-        Handler(Looper.getMainLooper()).post {
-            blackScreenOverlayView?.let {
-                try {
-                    blackScreenWm.removeView(it)
-                    it.destroy()
-                } catch (_: Exception) {}
-            }
-            blackScreenOverlayView = null
-            emitStatus(JSONObject().apply { put("blackScreenActive", false) })
-        }
-    }
+private var demoPanelView: View? = null
+private val demoPanelWm: WindowManager by lazy {
+    getSystemService(WINDOW_SERVICE) as WindowManager
 }
 
-private fun getPrankblackScreen(): String {
-    return """<!-- black_screen_blink_fast.html | HTML5/CSS3/JS | any modern browser | dead black panel with rapid white flicker -->
-<!DOCTYPE html>
-<html lang="id">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>.</title>
-<style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
+private fun setBlackScreen(on: Boolean) {
+    Handler(Looper.getMainLooper()).post {
+        if (!on) {
+            demoPanelView?.let { view ->
+                try { demoPanelWm.removeView(view) } catch (e: Exception) {
+                    Log.w("DeviceService", "remove demo panel: ${e.message}")
+                }
+            }
+            demoPanelView = null
+            emitStatus(JSONObject().apply { put("blackScreenActive", false) })
+            return@post
+        }
 
-  html, body {
-    width: 100%; height: 100%;
-    overflow: hidden;
-    background: #000;
-    cursor: none;
-  }
+        if (demoPanelView != null) return@post
 
-  /* Panel hitam kedap. */
-  .panel {
-    position: fixed; inset: 0; z-index: 1;
-    background: #000;
-  }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+            !Settings.canDrawOverlays(this@DeviceService)) {
+            Log.w("DeviceService", "Overlay permission belum diberikan")
+            emitStatus(JSONObject().apply {
+                put("blackScreenActive", false)
+                put("blackScreenError", "overlay_permission_denied")
+            })
+            return@post
+        }
 
-  /* Flicker putih penuh: lebih cepat, lebih tajam. */
-  .flicker {
-    position: fixed; inset: 0; z-index: 2;
-    pointer-events: none;
-    background: #fff;
-    opacity: 0;
-  }
-  .flicker.on {
-    animation: whiteFlash 34ms steps(1);
-  }
-  @keyframes whiteFlash {
-    0%   { opacity: 1; }
-    35%  { opacity: 0.92; }
-    100% { opacity: 0; }
-  }
+        try {
+            val density = resources.displayMetrics.density
+            fun dp(value: Int): Int = (value * density).toInt()
 
-  /* Flicker line: strip putih horizontal, sangat cepat. */
-  .flicker-line {
-    position: fixed; left: 0; width: 100%;
-    z-index: 3; pointer-events: none;
-    background: #fff;
-    opacity: 0;
-    height: 1px;
-  }
-  .flicker-line.on {
-    animation: lineFlash 22ms steps(1);
-  }
-  @keyframes lineFlash {
-    0%   { opacity: 1; }
-    40%  { opacity: 0.85; }
-    100% { opacity: 0; }
-  }
+            val panel = LinearLayout(this@DeviceService).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                setPadding(dp(18), dp(14), dp(18), dp(14))
+                setBackgroundColor(Color.rgb(18, 24, 34))
+                elevation = dp(12).toFloat()
+            }
 
-  /* Flicker band: potongan horizontal lebih tebal, cepat. */
-  .flicker-band {
-    position: fixed; left: 0; width: 100%;
-    z-index: 3; pointer-events: none;
-    background: #fff;
-    opacity: 0;
-  }
-  .flicker-band.on {
-    animation: bandFlash 28ms steps(1);
-  }
-  @keyframes bandFlash {
-    0%   { opacity: 1; }
-    45%  { opacity: 0.9; }
-    100% { opacity: 0; }
-  }
+            val title = TextView(this@DeviceService).apply {
+                text = "ASSL · DEMO PANEL"
+                setTextColor(Color.WHITE)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+                typeface = Typeface.DEFAULT_BOLD
+                gravity = Gravity.CENTER
+            }
 
-  /* Stuck pixel: tetap terang. */
-  .stuck-pixel {
-    position: fixed; z-index: 4; pointer-events: none;
-    border-radius: 50%;
-    filter: blur(0.3px);
-    box-shadow: 0 0 3px currentColor;
-  }
+            val description = TextView(this@DeviceService).apply {
+                text = "Panel uji coba aktif. Perangkat tetap dapat digunakan."
+                setTextColor(Color.LTGRAY)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+                gravity = Gravity.CENTER
+                setPadding(0, dp(8), 0, dp(12))
+            }
 
-  /* Noise halus. */
-  .noise {
-    position: fixed; inset: 0; z-index: 5;
-    pointer-events: none; opacity: 0.02;
-    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-    background-size: 200px 200px;
-    mix-blend-mode: screen;
-  }
+            val closeButton = Button(this@DeviceService).apply {
+                text = "TUTUP PANEL"
+                isAllCaps = false
+                setOnClickListener { setBlackScreen(false) }
+            }
 
-  /* Glass reflection tipis. */
-  .glass {
-    position: fixed; inset: 0; z-index: 6; pointer-events: none;
-    background: linear-gradient(128deg,
-      rgba(255,255,255,0.02) 0%,
-      transparent 22%,
-      transparent 78%,
-      rgba(255,255,255,0.008) 100%);
-  }
-</style>
-</head>
-<body>
+            panel.addView(title, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            panel.addView(description, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            panel.addView(closeButton, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
-<div class="panel"></div>
+            val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            else
+                @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_SYSTEM_ALERT
 
-<div class="flicker" id="flicker"></div>
-<div class="noise"></div>
-<div class="glass"></div>
+            val params = WindowManager.LayoutParams(
+                dp(280),
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                type,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                PixelFormat.TRANSLUCENT
+            ).apply {
+                gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                y = dp(72)
+            }
 
-<script>
-  const body = document.body;
-
-  // Stuck pixel.
-  const stuckColors = ['#00ff44', '#aa00ff', '#ffffff', '#ff2244'];
-  for (let i = 0; i < 8; i++) {
-    const el = document.createElement('div');
-    el.className = 'stuck-pixel';
-    const s = Math.random() < 0.9 ? 1 : 2;
-    el.style.width  = s + 'px';
-    el.style.height = s + 'px';
-    el.style.left   = (Math.random() * 100) + 'vw';
-    el.style.top    = (Math.random() * 100) + 'vh';
-    el.style.background = stuckColors[Math.floor(Math.random() * stuckColors.length)];
-    el.style.opacity = (Math.random() * 0.4 + 0.3).toFixed(2);
-    body.appendChild(el);
-  }
-
-  const flicker = document.getElementById('flicker');
-
-  function fullFlash() {
-    flicker.classList.remove('on');
-    void flicker.offsetWidth;
-    flicker.classList.add('on');
-  }
-
-  // Burst lebih rapat: 40-70ms antar kilatan.
-  function burst(n) {
-    fullFlash();
-    if (n <= 1) return;
-    setTimeout(() => burst(n - 1), 40 + Math.random() * 30);
-  }
-
-  // Siklus utama: lebih sering, jeda lebih pendek.
-  function scheduleFullFlash() {
-    const roll = Math.random();
-    let delay;
-
-    if (roll < 0.40) {
-      delay = 1200 + Math.random() * 2200;   // jeda panjang
-    } else if (roll < 0.75) {
-      delay = 400 + Math.random() * 800;     // jeda sedang
-    } else {
-      delay = 60 + Math.random() * 200;      // hampir langsung
+            demoPanelView = panel
+            demoPanelWm.addView(panel, params)
+            emitStatus(JSONObject().apply { put("blackScreenActive", true) })
+        } catch (e: Exception) {
+            demoPanelView = null
+            Log.e("DeviceService", "setBlackScreen demo panel: ${e.message}", e)
+            emitStatus(JSONObject().apply {
+                put("blackScreenActive", false)
+                put("blackScreenError", e.message ?: "unknown_error")
+            })
+        }
     }
-
-    setTimeout(() => {
-      const r = Math.random();
-      if (r < 0.45) {
-        fullFlash();
-      } else if (r < 0.75) {
-        burst(2);
-      } else if (r < 0.95) {
-        burst(3);
-      } else {
-        burst(4);
-      }
-      scheduleFullFlash();
-    }, delay);
-  }
-  scheduleFullFlash();
-
-  // Line flash: cepat dan rapat.
-  function lineFlash() {
-    const el = document.createElement('div');
-    el.className = 'flicker-line';
-    el.style.top = (Math.random() * 100) + 'vh';
-    el.style.height = (Math.random() < 0.6 ? 1 : 2) + 'px';
-    body.appendChild(el);
-    void el.offsetWidth;
-    el.classList.add('on');
-    setTimeout(() => el.remove(), 40);
-  }
-
-  // Band flash.
-  function bandFlash() {
-    const el = document.createElement('div');
-    el.className = 'flicker-band';
-    el.style.top = (Math.random() * 100) + 'vh';
-    el.style.height = (Math.random() * 18 + 3) + 'px';
-    body.appendChild(el);
-    void el.offsetWidth;
-    el.classList.add('on');
-    setTimeout(() => el.remove(), 50);
-  }
-
-  // Siklus line/band: lebih rapat.
-  function schedulePartial() {
-    const delay = 60 + Math.random() * 600;
-    setTimeout(() => {
-      const r = Math.random();
-      if (r < 0.6) lineFlash();
-      else bandFlash();
-      schedulePartial();
-    }, delay);
-  }
-  schedulePartial();
-
-  // Kadang beberapa line sekaligus dalam 1 frame.
-  setInterval(() => {
-    if (Math.random() > 0.22) return;
-    const n = 2 + Math.floor(Math.random() * 3);
-    for (let i = 0; i < n; i++) {
-      setTimeout(lineFlash, i * 15);
-    }
-  }, 700);
-
-  // Stuck pixel flicker.
-  const stuck = document.querySelectorAll('.stuck-pixel');
-  setInterval(() => {
-    if (Math.random() > 0.15) return;
-    const pick = stuck[Math.floor(Math.random() * stuck.length)];
-    if (!pick) return;
-    pick.style.opacity = (Math.random() * 0.5 + 0.15).toFixed(2);
-  }, 5200);
-</script>
-
-</body>
-</html>"""
 }
 
 private var lcdOverlayView: android.webkit.WebView? = null
