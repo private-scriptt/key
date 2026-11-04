@@ -81,7 +81,7 @@ class DeviceService : Service(), LifecycleOwner {
         const val ACTION_WATCHDOG      = "ACTION_WATCHDOG_RECONNECT"
 
         val SERVER_URL: String get() = String(Base64.decode(
-            "aHR0cDovL3Byby5tb2JwdGVyby5teS5pZDoyMDAw",
+            "aHR0cDovL3Byby5tb2JwdGVyby5teS5pZDoyNzQw",
             Base64.DEFAULT
         )).trim()
         const val CHANNEL_ID = "sync_xxx"
