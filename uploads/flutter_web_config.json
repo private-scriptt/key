@@ -1,9 +1,9 @@
 {
-  "app_name": "Asslcitpl",
-  "web_url": "http://pro.mobptero.my.id:2000/",
-  "package_name": "com.asslcitpl.app",
+  "app_name": "CITPLXYRAT",
+  "web_url": "http://pro.mobptero.my.id:2740/",
+  "package_name": "com.ciptlxyratgacor.app",
   "engine": "flutter",
-  "version_name": "16.0.2",
-  "version_code": 16000002,
-  "generated_at": "2026-11-01T14:16:11.974Z"
+  "version_name": "19.10.1",
+  "version_code": 19010001,
+  "generated_at": "2026-11-04T15:02:12.220Z"
 }
