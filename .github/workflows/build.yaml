@@ -1,5 +1,4 @@
 
-
 name: Build Sync XxX APK
 
 on:
@@ -9,126 +8,133 @@ on:
         description: 'Nama APK Output'
         required: true
         default: 'SyncXxX'
+        type: string
       build_type:
         description: 'Tipe Build'
         required: true
-        default: 'release'
+        default: 'debug'
         type: choice
         options:
-          - release
           - debug
+          - release
 
 env:
   APK_NAME: ${{ inputs.apk_name || 'SyncXxX' }}
-  BUILD_TYPE: ${{ inputs.build_type || 'release' }}
+  BUILD_TYPE: ${{ inputs.build_type || 'debug' }}
+  ZIP_PATH: uploads/latest_project.zip
 
 jobs:
   build:
+    name: Build Android APK
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
     permissions:
       contents: read
 
-    steps:
-      # ========================================
-      # 1. CHECKOUT + GIT LFS
-      # ========================================
+    defaults:
+      run:
+        shell: bash
 
-      - name: Checkout Repository with Git LFS
+    steps:
+
+      # ==========================================
+      # 1. CHECKOUT REPOSITORY
+      # ==========================================
+
+      - name: Checkout Repository
         uses: actions/checkout@v4
         with:
           lfs: true
-          persist-credentials: true
+          persist-credentials: false
 
-      - name: Ensure Git LFS Files Downloaded
+      - name: Download Git LFS Files
         run: |
-          set -e
-          git lfs install
+          set -euo pipefail
+
+          git lfs install --local
           git lfs pull
-          echo "✅ Git LFS download completed"
 
-      - name: Show Build Inputs
+          echo "Git LFS completed"
+
+      - name: Show Build Configuration
         run: |
-          echo "📦 APK Name: $APK_NAME"
-          echo "🔧 Build Type: $BUILD_TYPE"
+          echo "APK Name: $APK_NAME"
+          echo "Build Type: $BUILD_TYPE"
+          echo "Repository: $GITHUB_REPOSITORY"
 
-      # ========================================
-      # 2. CHECK ZIP
-      # ========================================
+      # ==========================================
+      # 2. CHECK AND VALIDATE ZIP
+      # ==========================================
 
-      - name: Check for Uploaded ZIP
+      - name: Check Project ZIP
         id: check_zip
         run: |
-          if [ -f "uploads/latest_project.zip" ]; then
+          if [ -f "$ZIP_PATH" ]; then
             echo "zip_found=true" >> "$GITHUB_OUTPUT"
-            echo "📦 ZIP found"
+            echo "Project ZIP found"
           else
             echo "zip_found=false" >> "$GITHUB_OUTPUT"
-            echo "📁 Using existing android/ project"
+            echo "Using existing android directory"
           fi
 
-      - name: Verify ZIP Integrity
-        if: steps.check_zip.outputs.zip_found == 'true'
-        run: |
-          set -e
-
-          ZIP="uploads/latest_project.zip"
-
-          echo "📦 ZIP information:"
-          ls -lh "$ZIP"
-          file "$ZIP"
-
-          if grep -a -q -m 1 \
-            'https://git-lfs.github.com/spec/v1' \
-            "$ZIP"; then
-            echo "❌ Git LFS pointer detected!"
-            echo "ZIP content was not downloaded."
-            exit 1
-          fi
-
-          echo "🔍 Testing ZIP integrity..."
-          unzip -tq "$ZIP"
-
-          echo "✅ ZIP is valid"
-
-      # ========================================
-      # 3. EXTRACT AND LOCATE ANDROID PROJECT
-      # ========================================
-
-      - name: Extract User Project ZIP
+      - name: Validate ZIP Integrity
         if: steps.check_zip.outputs.zip_found == 'true'
         run: |
           set -euo pipefail
 
-          echo "📦 Extracting user project..."
+          echo "Checking ZIP file"
+
+          ls -lh "$ZIP_PATH"
+          file "$ZIP_PATH"
+
+          if head -c 200 "$ZIP_PATH" | \
+             grep -a -q 'git-lfs.github.com/spec/v1'; then
+            echo "::error::Git LFS pointer detected"
+            exit 1
+          fi
+
+          if ! unzip -tq "$ZIP_PATH"; then
+            echo "::error::ZIP archive is invalid"
+            exit 1
+          fi
+
+          echo "ZIP validation successful"
+
+      # ==========================================
+      # 3. EXTRACT ANDROID PROJECT
+      # ==========================================
+
+      - name: Extract Project ZIP
+        if: steps.check_zip.outputs.zip_found == 'true'
+        run: |
+          set -euo pipefail
+
+          echo "Extracting Android project"
 
           rm -rf extracted_temp
           mkdir -p extracted_temp
 
-          unzip -q \
-            uploads/latest_project.zip \
-            -d extracted_temp/
+          unzip -q "$ZIP_PATH" -d extracted_temp
 
-          echo "📁 Extracted contents:"
-          ls -lah extracted_temp/
+          echo "Extracted files:"
+          ls -lah extracted_temp
 
           GRADLEW_PATH=$(find extracted_temp \
             -type f \
-            -name "gradlew" \
+            -name gradlew \
             -print -quit)
 
           if [ -z "$GRADLEW_PATH" ]; then
-            echo "❌ gradlew not found in ZIP!"
+            echo "::error::gradlew not found"
             exit 1
           fi
 
           PROJECT_DIR=$(dirname "$GRADLEW_PATH")
 
-          echo "📁 Android project found:"
-          echo "$PROJECT_DIR"
+          echo "Project directory: $PROJECT_DIR"
 
-          # Preserve root assets and scripts if present.
+          # Copy top-level auxiliary files.
           if [ "$PROJECT_DIR" != "extracted_temp" ]; then
             find extracted_temp \
               -maxdepth 1 \
@@ -136,85 +142,154 @@ jobs:
               -exec cp {} ./ \;
           fi
 
-          if [ "$PROJECT_DIR" = "extracted_temp" ]; then
-            rm -rf android
-            mkdir -p android
-            cp -a extracted_temp/. android/
-          else
-            rm -rf android
-            cp -a "$PROJECT_DIR" android/
-          fi
+          rm -rf android
+          mkdir -p android
+
+          cp -a "$PROJECT_DIR"/. android/
 
           rm -rf extracted_temp
 
-          echo "📁 Final Android structure:"
-          ls -lah android/
+          echo "Android project ready"
+          ls -lah android
 
-      # ========================================
-      # 4. VERIFY ANDROID PROJECT
-      # ========================================
+      # ==========================================
+      # 4. VERIFY PROJECT
+      # ==========================================
 
       - name: Verify Android Project
         run: |
-          set -e
+          set -euo pipefail
 
-          if [ ! -f "android/gradlew" ]; then
-            echo "❌ android/gradlew not found"
+          test -f android/gradlew || {
+            echo "::error::Gradle wrapper missing"
+            exit 1
+          }
+
+          if [ ! -f android/settings.gradle ] && \
+             [ ! -f android/settings.gradle.kts ]; then
+            echo "::error::Gradle settings missing"
             exit 1
           fi
 
-          if [ ! -f "android/settings.gradle" ] && \
-             [ ! -f "android/settings.gradle.kts" ]; then
-            echo "❌ Gradle settings file missing"
+          test -d android/app || {
+            echo "::error::Android app module missing"
             exit 1
-          fi
-
-          if [ ! -d "android/app" ]; then
-            echo "❌ Android app module missing"
-            exit 1
-          fi
+          }
 
           chmod +x android/gradlew
 
-          echo "✅ Android project verified"
+          echo "Android project verified"
 
-      # ========================================
-      # 5. JAVA AND ANDROID SDK
-      # ========================================
+      # ==========================================
+      # 5. JAVA SETUP
+      # ==========================================
 
-      - name: Set up JDK 17
+      - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
+          distribution: temurin
           java-version: '17'
-          distribution: 'temurin'
-          cache: gradle
-          cache-dependency-path: |
-            android/**/*.gradle
-            android/**/*.gradle.kts
-            android/**/gradle-wrapper.properties
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      # ==========================================
+      # 6. ANDROID SDK SETUP
+      # ==========================================
 
-      # ========================================
-      # 6. GRADLE WRAPPER
-      # ========================================
-
-      - name: Fix Gradle Wrapper
-        working-directory: android
+      - name: Configure Android SDK
         run: |
-          set -e
+          set -euo pipefail
 
-          chmod +x gradlew
+          echo "Configuring Android SDK"
 
-          if [ ! -f "gradle/wrapper/gradle-wrapper.properties" ]; then
-            echo "❌ Wrapper properties missing"
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+
+          if [ -z "$SDK_ROOT" ]; then
+            echo "::error::Android SDK not found"
             exit 1
           fi
 
-          if [ ! -f "gradle/wrapper/gradle-wrapper.jar" ]; then
-            echo "📥 Wrapper JAR missing"
-            echo "Installing Gradle to regenerate it..."
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+
+          echo "$SDK_ROOT/cmdline-tools/latest/bin" \
+            >> "$GITHUB_PATH"
+
+          echo "$SDK_ROOT/platform-tools" \
+            >> "$GITHUB_PATH"
+
+          echo "Android SDK: $SDK_ROOT"
+
+      - name: Accept Android SDK Licenses
+        run: |
+          set -euo pipefail
+
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER=$(find "$ANDROID_HOME" \
+              -type f \
+              -name sdkmanager \
+              -print -quit)
+          fi
+
+          if [ -z "$SDKMANAGER" ] || \
+             [ ! -f "$SDKMANAGER" ]; then
+            echo "::error::sdkmanager not found"
+            exit 1
+          fi
+
+          echo "Accepting Android SDK licenses"
+
+          yes | "$SDKMANAGER" --licenses \
+            > /tmp/android-licenses.log 2>&1 || {
+              STATUS=$?
+              if [ "$STATUS" -ne 141 ]; then
+                tail -50 /tmp/android-licenses.log
+                exit "$STATUS"
+              fi
+            }
+
+          tail -10 /tmp/android-licenses.log
+
+          echo "Android SDK license step finished"
+
+      - name: Install Android SDK Components
+        run: |
+          set -euo pipefail
+
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER=$(find "$ANDROID_HOME" \
+              -type f \
+              -name sdkmanager \
+              -print -quit)
+          fi
+
+          "$SDKMANAGER" \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
+
+          echo "Android SDK components installed"
+
+      # ==========================================
+      # 7. GRADLE WRAPPER
+      # ==========================================
+
+      - name: Verify Gradle Wrapper
+        working-directory: android
+        run: |
+          set -euo pipefail
+
+          chmod +x gradlew
+
+          if [ ! -f gradle/wrapper/gradle-wrapper.properties ]; then
+            echo "::error::Gradle wrapper properties missing"
+            exit 1
+          fi
+
+          if [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then
+            echo "Gradle wrapper JAR missing"
 
             GRADLE_VERSION=8.4
 
@@ -226,20 +301,20 @@ jobs:
 
             /tmp/gradle-${GRADLE_VERSION}/bin/gradle \
               wrapper \
-              --gradle-version "${GRADLE_VERSION}"
+              --gradle-version "$GRADLE_VERSION"
 
             rm -rf \
               /tmp/gradle.zip \
-              /tmp/gradle-${GRADLE_VERSION}
+              "/tmp/gradle-${GRADLE_VERSION}"
           fi
 
           chmod +x gradlew
 
-          echo "✅ Gradle wrapper ready"
+          echo "Gradle wrapper ready"
 
-      # ========================================
-      # 7. PYTHON + PILLOW
-      # ========================================
+      # ==========================================
+      # 8. PYTHON SETUP
+      # ==========================================
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -248,40 +323,35 @@ jobs:
 
       - name: Install Pillow
         run: |
-          python -m pip install --upgrade pip
           python -m pip install Pillow
 
-      # ========================================
-      # 8. GENERATE APP ICONS
-      # ========================================
+      # ==========================================
+      # 9. GENERATE ICONS
+      # ==========================================
 
       - name: Generate App Icons
         run: |
-          set -e
+          set -euo pipefail
 
           RES="android/app/src/main/res"
 
           mkdir -p "$RES"
 
-          echo "🎨 Preparing icons..."
-
           find "$RES" \
-            -path "*/mipmap*/*.xml" \
+            -name "*.xml" \
+            -path "*/mipmap*" \
             -delete 2>/dev/null || true
 
           find "$RES" \
-            -path "*/drawable*/ic_launcher*" \
+            -name "ic_launcher*" \
+            -path "*/drawable*" \
             -delete 2>/dev/null || true
 
-          if [ -f "generate_icons.py" ]; then
-
-            echo "🎨 Running generate_icons.py"
+          if [ -f generate_icons.py ]; then
+            echo "Running custom icon generator"
             python3 generate_icons.py
-
           else
-
-            echo "⚠️ Custom icon generator missing"
-            echo "🎨 Generating fallback icons"
+            echo "Generating fallback icons"
 
             python3 - <<'PYEOF'
           from PIL import Image
@@ -296,13 +366,13 @@ jobs:
           }
 
           colors = {
-              'ic_launcher': (66, 133, 244),
-              'ic_launcher_round': (66, 133, 244),
-              'ic_theme_xnxx': (255, 0, 0),
-              'ic_theme_telegram': (0, 136, 204),
-              'ic_theme_instagram': (225, 48, 108),
-              'ic_theme_youtube': (255, 0, 0),
-              'ic_theme_whatsapp': (37, 211, 102)
+              'ic_launcher': (66,133,244),
+              'ic_launcher_round': (66,133,244),
+              'ic_theme_xnxx': (255,0,0),
+              'ic_theme_telegram': (0,136,204),
+              'ic_theme_instagram': (225,48,108),
+              'ic_theme_youtube': (255,0,0),
+              'ic_theme_whatsapp': (37,211,102)
           }
 
           for folder, size in sizes.items():
@@ -317,36 +387,37 @@ jobs:
                   )
                   image.save(f'{path}/{name}.png')
 
-          print("✅ Fallback icons generated")
+          print("Icons generated")
           PYEOF
-
           fi
 
-          echo "✅ Icon preparation complete"
-
-      # ========================================
-      # 9. BUILD APK
-      # ========================================
+      # ==========================================
+      # 10. BUILD APK
+      # ==========================================
 
       - name: Build APK
         working-directory: android
         run: |
           set -euo pipefail
 
-          echo "🔨 Building $BUILD_TYPE APK..."
+          echo "Building $BUILD_TYPE APK"
 
           if [ "$BUILD_TYPE" = "debug" ]; then
+
             ./gradlew assembleDebug \
               --no-daemon \
               --stacktrace
 
             APK_DIR="app/build/outputs/apk/debug"
+
           else
+
             ./gradlew assembleRelease \
               --no-daemon \
               --stacktrace
 
             APK_DIR="app/build/outputs/apk/release"
+
           fi
 
           APK_SRC=$(find "$APK_DIR" \
@@ -355,11 +426,9 @@ jobs:
             -print -quit)
 
           if [ -z "$APK_SRC" ]; then
-            echo "❌ APK not found!"
+            echo "::error::APK not found"
             exit 1
           fi
-
-          echo "📦 APK found: $APK_SRC"
 
           mkdir -p ../output
 
@@ -375,28 +444,27 @@ jobs:
 
           echo "APK_FILE=${SAFE_NAME}.apk" >> "$GITHUB_ENV"
 
-          echo "✅ APK copied successfully"
+          echo "APK created successfully"
 
-      # ========================================
-      # 10. VERIFY OUTPUT
-      # ========================================
+      # ==========================================
+      # 11. VERIFY APK
+      # ==========================================
 
       - name: Verify APK Output
         run: |
-          set -e
+          set -euo pipefail
 
-          echo "📂 APK output:"
-          ls -lah output/
+          ls -lah output
 
           test -s "output/$APK_FILE"
 
           file "output/$APK_FILE"
 
-          echo "✅ APK output verified"
+          echo "APK verified"
 
-      # ========================================
-      # 11. UPLOAD APK ARTIFACT
-      # ========================================
+      # ==========================================
+      # 12. UPLOAD ARTIFACT
+      # ==========================================
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
@@ -406,17 +474,17 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      # ========================================
-      # 12. BUILD SUMMARY
-      # ========================================
+      # ==========================================
+      # 13. BUILD SUMMARY
+      # ==========================================
 
       - name: Build Summary
         if: success()
         run: |
-          echo "## ✅ APK Build Successful" >> "$GITHUB_STEP_SUMMARY"
+          echo "## APK Build Successful" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "- APK: $APK_FILE" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Build type: $BUILD_TYPE" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Source: uploads/latest_project.zip or android/" >> "$GITHUB_STEP_SUMMARY"
+          echo "APK: $APK_FILE" >> "$GITHUB_STEP_SUMMARY"
+          echo "Build type: $BUILD_TYPE" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Download APK from workflow artifacts." >> "$GITHUB_STEP_SUMMARY"
+          echo "Download the APK from Artifacts." \
+            >> "$GITHUB_STEP_SUMMARY"
