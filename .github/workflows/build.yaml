@@ -1,17 +1,5 @@
-Skip to content
-Install GitHub Mobile for Android
-GitHub Mobile for Android
-private-scriptt
-key
-Repository navigation
-Code
-Issues
-Pull requests
-Actions
-Build Sync XxX APK
-Build Sync XxX APK #4
-Workflow file for this run
-.github/workflows/build.yaml at 2ba978d
+
+
 name: Build Sync XxX APK
 
 on:
